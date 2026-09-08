@@ -40,6 +40,16 @@
 - **国家数据集**：从根据人口统计等信息生成的人物资料中筛选、抽样，资料包含年龄、职业、地区和生活背景。
 - **LLM-generated personas**：让 AI 按你描述的受众现场生成人物，更灵活，但也更容易重复或遗漏某类人。
 
+#### 本地人物数据从哪里来？
+
+目前接入的是 **NVIDIA 发布的 Nemotron-Personas 系列**，通过 Hugging Face（公开的 AI 模型与数据平台）下载到本机。“本地”指保存位置，不是企业自己收集的客户资料。
+
+它的制作思路是：**参考公开人口统计，构建人物背景分布，再用 AI 补充职业经历、兴趣和生活描述，形成虚拟人物资料。** 例如，美国版参考美国人口普查局的“美国社区调查”，印度版参考 2011 年人口普查；具体来源与限制见各国官方说明。
+
+当前六个国家的官方出处：[美国](https://huggingface.co/datasets/nvidia/Nemotron-Personas-USA)、[日本](https://huggingface.co/datasets/nvidia/Nemotron-Personas-Japan)、[印度](https://huggingface.co/datasets/nvidia/Nemotron-Personas-India)（本项目使用英文版）、[新加坡](https://huggingface.co/datasets/nvidia/Nemotron-Personas-Singapore)、[巴西](https://huggingface.co/datasets/nvidia/Nemotron-Personas-Brazil)、[法国](https://huggingface.co/datasets/nvidia/Nemotron-Personas-France)。
+
+**人口统计提供的是背景参考，不是真实购买意愿。** 数据里的每条记录是合成人物，而本次材料的评分和反馈由 SGO 调用模型另行生成；它们不是这些人物接受过的真实访谈。
+
 **选“法国数据”，不等于选到了法国采购商。** 这些资料不是进口商名录，也不是可联系的买家名单。普通居民喜欢一只杯子，与进口商是否愿意批量采购，是两回事。
 
 针对专业采购场景，可以选择现场生成人物，并写清国家、公司类型、岗位、采购规模和关注点。例如，采购人员关注交期，品控人员关注一致性，企业负责人关注资金占用。先检查人物背景是否贴近你的客户，再看评分。
