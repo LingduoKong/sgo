@@ -317,6 +317,95 @@
   .mt-16 { margin-top: 16px; }
   .mb-8 { margin-bottom: 8px; }
   .text-center { text-align: center; }
+
+  /* Editorial research workspace */
+  :root {
+    --bg: #f5f3ee;
+    --surface: #fffdf8;
+    --surface2: #eeece5;
+    --border: #d8d4ca;
+    --text: #202b28;
+    --text2: #66716b;
+    --accent: #23634f;
+    --accent2: #397d68;
+    --green: #23634f;
+    --yellow: #a56a19;
+    --red: #a74332;
+    --orange: #a56a19;
+    --radius: 14px;
+  }
+  body { background: var(--bg); color: var(--text); font-family: Georgia, 'Times New Roman', serif; }
+  body::before { content: ''; position: fixed; inset: 0; pointer-events: none; opacity: .08; background-image: radial-gradient(#c9c5bb .55px, transparent .55px); background-size: 7px 7px; mix-blend-mode: multiply; }
+  .container { max-width: 1440px; padding: 0 36px 64px; }
+  header { text-align: left; padding: 18px 0 24px; border-bottom: 1px solid var(--border); margin-bottom: 20px; display: block; }
+  header::before { content: 'SGO / RESEARCH WORKSPACE'; grid-column: 1 / -1; color: var(--accent); font: 700 .72rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .16em; }
+  header h1 { color: var(--text); background: none; -webkit-text-fill-color: initial; font: 700 clamp(2.25rem, 5vw, 3.45rem)/.95 Georgia, serif; letter-spacing: -.065em; max-width: 780px; }
+  header p { color: var(--text2); margin: 12px 0 0; font: 1rem/1.5 ui-sans-serif, system-ui, sans-serif; max-width: 480px; }
+  .config-badge { display: inline-block; margin: 14px 8px 0 0 !important; border-color: var(--border); border-radius: 999px; background: transparent; font: .72rem ui-monospace, monospace; }
+  .workspace-shell { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 28px; align-items: start; }
+  .workspace-main { min-width: 0; }
+  .workspace-sidebar { position: sticky; top: 18px; order: 2; }
+  .workspace-sidebar .step { margin-bottom: 14px; }
+  .workflow-strip { display: flex; align-items: center; gap: 10px; margin: 0 0 22px; color: var(--text2); font: .72rem ui-monospace, monospace; text-transform: uppercase; letter-spacing: .08em; }
+  .workflow-strip span { display: inline-flex; align-items: center; gap: 7px; }
+  .workflow-strip span::before { content: ''; width: 8px; height: 8px; border: 1px solid var(--accent); border-radius: 50%; }
+  .workflow-strip i { height: 1px; width: 32px; background: var(--border); }
+  .step { background: rgba(255,253,248,.9); border: 1px solid var(--border); border-radius: var(--radius); padding: clamp(20px, 3vw, 38px); box-shadow: 0 12px 32px rgba(40,51,44,.045); }
+  #nemotronSetup { border-color: var(--border) !important; }
+  #nemotronSetup .step-num { border-color: var(--border) !important; color: var(--accent) !important; }
+  .dataset-advanced { margin-top: 12px; }
+  .dataset-advanced summary { color: var(--text2); font: .72rem ui-monospace, monospace; cursor: pointer; }
+  #step1 { min-height: 560px; }
+  .step.active { border-color: var(--accent); box-shadow: 0 14px 40px rgba(35,99,79,.11); }
+  .step-header { margin-bottom: 10px; }
+  .step-num { width: 28px; height: 28px; border-color: var(--accent); color: var(--accent); background: transparent; font: 700 .75rem ui-monospace, monospace; }
+  .step-title { font: 700 1.3rem/1.2 Georgia, serif; letter-spacing: -.02em; }
+  .step-desc, label, .field, .btn-row, button, input, select, textarea, summary, .progress-text, .stat-label { font-family: ui-sans-serif, system-ui, sans-serif; }
+  .step-desc { color: var(--text2); font-size: .88rem; }
+  textarea, input, select { background: #fffefa; border-color: var(--border); color: var(--text); border-radius: 9px; }
+  textarea:focus, input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(35,99,79,.12); }
+  textarea { min-height: 190px; font: 1rem/1.55 Georgia, serif; }
+  label { color: var(--text); font-weight: 700; font-size: .76rem; letter-spacing: .02em; }
+  button { background: var(--accent); border-radius: 8px; padding: 11px 18px; }
+  button:hover { opacity: .92; transform: translateY(-1px); }
+  button.secondary, .template-chip, .seg-row button { background: transparent; border-color: var(--border); color: var(--text); }
+  .template-chip { border-radius: 5px; }
+  .template-chip:hover { border-color: var(--accent); color: var(--accent); }
+  .progress-fill { background: var(--accent); }
+  .eval-log, .results-details { background: #ebe9e2; color: var(--text); }
+  .gradient-table th { color: var(--text2); border-bottom-color: var(--border); }
+  .gradient-table td { border-bottom-color: var(--border); }
+  .gradient-table tr:hover { background: #f0eee8; }
+  .score-big { color: var(--accent); font-family: Georgia, serif; }
+  .sidebar-kicker { font: 700 .68rem ui-monospace, monospace; letter-spacing: .14em; color: var(--accent); text-transform: uppercase; margin-bottom: 8px; }
+  .dataset-meta { font: .75rem/1.45 ui-sans-serif, system-ui, sans-serif; color: var(--text2); margin-top: 8px; min-height: 34px; }
+  .dataset-meta.ready { color: var(--accent); }
+  .dataset-meta.error { color: var(--red); }
+  .dataset-row { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .dataset-count { font: .7rem ui-monospace, monospace; color: var(--text2); white-space: nowrap; }
+  .locked-note { font: .7rem ui-monospace, monospace; color: var(--yellow); margin-top: 8px; }
+  .table-scroll { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .markdown-toggle { display: inline-flex; gap: 4px; margin: 0 0 10px; }
+  .field-label-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .markdown-toggle button { padding: 6px 10px; font-size: .72rem; }
+  .markdown-toggle button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+  .markdown-body { color: var(--text); font: .92rem/1.65 ui-sans-serif, system-ui, sans-serif; min-width: 0; max-width: 100%; overflow-x: auto; overflow-wrap: anywhere; }
+  .markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4, .markdown-body h5, .markdown-body h6 { color: var(--text); font-family: Georgia, serif; line-height: 1.2; margin: 1.1em 0 .45em; }
+  .markdown-body h1 { font-size: 1.45rem; } .markdown-body h2 { font-size: 1.25rem; } .markdown-body h3 { font-size: 1.05rem; }
+  .markdown-body p { margin: .55em 0; } .markdown-body ul, .markdown-body ol { padding-left: 1.45rem; margin: .55em 0; }
+  .markdown-body blockquote { border-left: 3px solid var(--accent); margin: .8em 0; padding: .2em 1em; color: var(--text2); }
+  .markdown-body a { color: var(--accent); } .markdown-body code { background: var(--surface2); border-radius: 4px; padding: .1em .3em; font-size: .88em; }
+  .markdown-body pre { background: #ebe9e2; border: 1px solid var(--border); border-radius: 8px; overflow-x: auto; padding: 12px; }
+  .markdown-body pre code { background: transparent; padding: 0; white-space: pre; }
+  .markdown-body table { border-collapse: collapse; margin: .8em 0; min-width: 420px; font-size: .86em; }
+  .markdown-body th, .markdown-body td { border: 1px solid var(--border); padding: 7px 9px; text-align: left; }
+  .markdown-body th { background: var(--surface2); }
+  .markdown-source { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .78rem; }
+  .markdown-body.results-details { white-space: normal; font-family: ui-sans-serif, system-ui, sans-serif; }
+  .dataset-anchor { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 13px; color: var(--accent); font: 700 .73rem ui-sans-serif, system-ui, sans-serif; text-decoration: none; }
+  .dataset-anchor:hover { text-decoration: underline; }
+  @media (max-width: 850px) { .container { padding: 0 16px 42px; } header { padding-bottom: 18px; } .workspace-shell { grid-template-columns: 1fr; } .workspace-main { order: 0; } .workspace-sidebar { position: static; order: 1; } #step1 { min-height: auto; } }
+  @media (max-width: 520px) { header h1 { font-size: 1.95rem; } header p { font-size: .86rem; margin-top: 8px; } header { padding-top: 14px; margin-bottom: 14px; } .workflow-strip { margin-bottom: 14px; font-size: .62rem; } .step { padding: 16px; } textarea { min-height: 180px; } .workspace-sidebar .step { padding: 16px; } #panelSettings { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px 14px; } #panelSettings .sidebar-kicker { grid-column: 1 / -1; margin-bottom: 0; } }
 </style>
 </head>
 <body>
@@ -351,38 +440,47 @@
     <button onclick="saveApiKey()">Connect</button>
   </div>
 
-  <!-- Nemotron setup (shown if not available) -->
+  <div class="workflow-strip" aria-label="Workflow"><span>Draft</span><i></i><span>Panel</span><i></i><span>Decide</span></div>
+
+  <div class="workspace-shell">
+    <aside class="workspace-sidebar" aria-label="Panel configuration">
+  <!-- Dataset setup and selector -->
   <div class="step hidden" id="nemotronSetup" style="border-color:var(--yellow)">
     <div class="step-header">
-      <div class="step-num" style="border-color:var(--yellow);color:var(--yellow)">!</div>
-      <div class="step-title">Panel data needed</div>
+      <h2 class="step-title">Panel source</h2>
     </div>
-    <p class="step-desc">SGO panels are built from real census-grounded personas. Pick a country to load — this is a one-time setup.</p>
+    <p class="step-desc">Choose the population that will evaluate your draft. The source stays attached to the run.</p>
     <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
       <div class="field" style="flex:1;min-width:120px">
-        <label>Country</label>
-        <select id="nemotronDataset" style="padding:10px 12px">
-          <option value="USA">USA (6M personas)</option>
-          <option value="Japan">Japan (6M)</option>
-          <option value="India">India (21M)</option>
-          <option value="Singapore">Singapore (888K)</option>
-          <option value="Brazil">Brazil (6M)</option>
-          <option value="France">France (6M)</option>
-        </select>
+        <label for="nemotronDataset">Dataset</label>
+        <select id="nemotronDataset" style="padding:10px 12px" aria-describedby="datasetMeta"></select>
       </div>
-      <div class="field" id="nemotronPathField" style="flex:2;min-width:200px">
-        <label>Folder</label>
-        <input type="text" id="nemotronPath" placeholder="e.g. data/nemotron">
-      </div>
+      <details class="dataset-advanced" id="datasetAdvancedPath">
+        <summary>Advanced: choose a local folder</summary>
+        <div class="field" id="nemotronPathField" style="flex:2;min-width:200px;margin-top:10px">
+          <label for="nemotronPath">Folder</label>
+          <input type="text" id="nemotronPath" placeholder="Default folder" aria-label="Dataset folder">
+        </div>
+      </details>
     </div>
     <div class="btn-row">
-      <button onclick="setupNemotron()">Load personas</button>
+      <button onclick="setupNemotron()" id="datasetLoadBtn">Load selected dataset</button>
     </div>
+    <div id="datasetMeta" class="dataset-meta" aria-live="polite"></div>
+    <div id="datasetLockNote" class="locked-note hidden">Dataset locked while a run is active.</div>
     <div id="nemotronStatus" class="hidden mt-16">
       <div class="progress-text" id="nemotronStatusText"></div>
       <div class="progress-bar"><div class="progress-fill" id="nemotronProgressBar" style="width:0%"></div></div>
     </div>
   </div>
+
+    <div class="step" id="panelSettings">
+      <div class="sidebar-kicker">Run settings</div>
+      <div class="field"><label for="panelSize">Panel size</label><input type="number" id="panelSize" value="30" min="5" max="80"></div>
+      <label style="display:flex;align-items:center;gap:8px;margin:0;font-size:.78rem"><input type="checkbox" id="biasCalibration" checked style="width:auto;margin:0"> Reduce framing effects</label>
+    </div>
+    </aside>
+    <main class="workspace-main">
 
   <!-- STEP 1: Entity + Evaluate (one click) -->
   <div class="step active" id="step1">
@@ -393,22 +491,23 @@
     <p class="step-desc">Paste what you want reviewed, set your goal and audience, and let the panel react.</p>
 
     <div class="template-chips">
-      <span class="template-chip" onclick="loadTemplate('product')">Product</span>
-      <span class="template-chip" onclick="loadTemplate('resume')">Resume</span>
-      <span class="template-chip" onclick="loadTemplate('pitch')">Pitch</span>
-      <span class="template-chip" onclick="loadTemplate('policy')">Policy</span>
-      <span class="template-chip" onclick="loadTemplate('listing')">Listing</span>
-      <span class="template-chip" onclick="loadTemplate('blog')">Blog Post</span>
+      <button type="button" class="template-chip" onclick="loadTemplate('product')">Product</button>
+      <button type="button" class="template-chip" onclick="loadTemplate('resume')">Resume</button>
+      <button type="button" class="template-chip" onclick="loadTemplate('pitch')">Pitch</button>
+      <button type="button" class="template-chip" onclick="loadTemplate('policy')">Policy</button>
+      <button type="button" class="template-chip" onclick="loadTemplate('listing')">Listing</button>
+      <button type="button" class="template-chip" onclick="loadTemplate('blog')">Blog Post</button>
     </div>
 
     <div class="field">
-      <label>What should the panel review?</label>
+      <div class="field-label-row"><label for="entityText">What should the panel review?</label><div class="markdown-toggle" role="group" aria-label="Draft view"><button type="button" id="entityEditToggle" class="secondary" aria-pressed="true">Edit</button><button type="button" id="entityPreviewToggle" class="secondary" aria-pressed="false">Preview</button></div></div>
       <textarea id="entityText" placeholder="Paste the text someone would actually see: landing page, resume, pitch, profile, policy..."></textarea>
+      <div id="entityPreview" class="markdown-body hidden" aria-live="polite"></div>
     </div>
 
     <div class="field">
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <label>What outcome are you optimizing for?</label>
+        <label for="goalText">What outcome are you optimizing for?</label>
         <button class="secondary" style="padding:4px 12px;font-size:0.75rem" onclick="inferSpec()">Auto-fill</button>
       </div>
       <input type="text" id="goalText" placeholder="e.g. 'Increase conversion rate' or 'Get more interview callbacks'">
@@ -416,7 +515,7 @@
 
     <div class="field">
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <label>Who should be on the panel?</label>
+        <label for="cohortDesc">Who should be on the panel?</label>
         <button class="secondary" style="padding:4px 12px;font-size:0.75rem" onclick="inferSpec()">Auto-fill</button>
       </div>
       <input type="text" id="cohortDesc" placeholder="e.g. 'Engineering managers at mid-stage startups' or 'US consumers aged 25-45'">
@@ -444,21 +543,8 @@
       </p>
     </div>
 
-    <details class="mb-8">
-      <summary style="cursor:pointer;color:var(--text2);font-size:0.85rem">Panel settings</summary>
-      <div style="padding:12px 0">
-        <div class="field">
-          <label>Panel size (more people = steadier results)</label>
-          <input type="number" id="panelSize" value="30" min="5" max="80"
-                 style="width:80px;padding:6px;text-align:center">
-        </div>
-        <label style="display:inline-flex;align-items:center;gap:8px;margin:0;font-size:0.85rem;cursor:pointer">
-          <input type="checkbox" id="biasCalibration" checked style="width:auto;margin:0">
-          Reduce framing and authority effects
-        </label>
-      </div>
-    </details>
-
+    <a class="dataset-anchor" id="datasetAnchor" href="#nemotronSetup">Panel source: loading · Change</a>
+    <br>
     <button onclick="runFullPipeline()" id="goBtn">Build panel and review</button>
 
     <div id="pipelineProgress" class="hidden mt-16">
@@ -476,7 +562,9 @@
       </div>
       <details>
         <summary style="cursor:pointer;color:var(--text2);font-size:0.9rem">Full analysis</summary>
-        <div class="results-details" id="evalAnalysis"></div>
+        <div class="markdown-toggle" role="group" aria-label="Analysis view"><button type="button" id="analysisRenderToggle" class="secondary" aria-pressed="true">Rendered</button><button type="button" id="analysisSourceToggle" class="secondary" aria-pressed="false">Source</button></div>
+        <div class="results-details markdown-body" id="analysisRendered"></div>
+        <pre class="results-details markdown-source hidden" id="evalAnalysis"></pre>
       </details>
       <div class="btn-row mt-16">
         <button onclick="runDirections()">Test what to change next</button>
@@ -502,12 +590,14 @@
 
     <div id="cfResults" class="hidden mt-16">
       <h3 style="margin-bottom:12px">Priority Actions</h3>
+      <div class="table-scroll">
       <table class="gradient-table" id="gradientTable">
         <thead>
           <tr><th>#</th><th>Change</th><th>Avg Impact</th><th>Range</th><th>Helps</th><th>Hurts</th></tr>
         </thead>
         <tbody></tbody>
       </table>
+      </div>
       <div id="gradientText" class="hidden"></div>
       <div id="changesTested" class="hidden"></div>
       <div class="btn-row mt-16">
@@ -559,12 +649,14 @@
 
     <div id="auditResults" class="hidden mt-16">
       <h3 style="margin-bottom:12px">Panel Realism Check</h3>
+      <div class="table-scroll">
       <table class="gradient-table" id="auditTable">
         <thead>
           <tr><th>Check</th><th>Shifted %</th><th>Avg score change</th><th>Human baseline</th><th>Assessment</th></tr>
         </thead>
         <tbody></tbody>
       </table>
+      </div>
       <details class="mt-12">
         <summary style="cursor:pointer;color:var(--text2);font-size:0.9rem">Full report</summary>
         <div class="results-details" id="auditReport"></div>
@@ -576,8 +668,12 @@
       </div>
     </div>
   </div>
+</main>
+</div>
 </div>
 
+<script src="/static/vendor/marked.min.js"></script>
+<script src="/static/vendor/purify.min.js"></script>
 <script>
 const TEMPLATES = {
   product: `# Beacon — Infrastructure Monitoring for Growing Teams
@@ -756,6 +852,10 @@ This only works because we have a strong product manager who keeps the backlog p
 let sessionId = null;
 let evalResultsData = null;
 let lastGradientData = null;
+let personaDatasets = [];
+let selectedDataset = 'USA';
+let pipelineBusy = false;
+let configReady = false;
 
 // LLM credentials — stored only in browser JS memory, never persisted
 let llmApiKey = '';
@@ -789,42 +889,133 @@ function esc(str) {
     .replace(/'/g, '&#039;');
 }
 
+const MARKDOWN_TAGS = ['a', 'blockquote', 'br', 'code', 'del', 'em', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'li', 'ol', 'p', 'pre', 'strong', 'table', 'tbody', 'td', 'th', 'thead', 'tr', 'ul'];
+const MARKDOWN_ATTRS = ['href', 'title', 'target', 'rel'];
+
+function renderMarkdown(source) {
+  const raw = String(source || '');
+  if (!raw.trim()) return '<p class="markdown-empty">Nothing to preview yet.</p>';
+  if (!window.marked || !window.DOMPurify) return `<p>${esc(raw)}</p>`;
+  const html = window.marked.parse(raw, {gfm: true, breaks: true});
+  return window.DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: MARKDOWN_TAGS,
+    ALLOWED_ATTR: MARKDOWN_ATTRS,
+    ALLOW_DATA_ATTR: false,
+    FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form'],
+    FORBID_ATTR: ['style', 'onerror', 'onclick', 'onload'],
+    ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|\/|#)/i,
+  });
+}
+
+function setEntityMode(mode) {
+  const editing = mode === 'edit';
+  document.getElementById('entityText').classList.toggle('hidden', !editing);
+  document.getElementById('entityPreview').classList.toggle('hidden', editing);
+  document.getElementById('entityEditToggle').setAttribute('aria-pressed', String(editing));
+  document.getElementById('entityPreviewToggle').setAttribute('aria-pressed', String(!editing));
+  if (!editing) document.getElementById('entityPreview').innerHTML = renderMarkdown(document.getElementById('entityText').value);
+}
+
+let analysisSource = '';
+function setAnalysis(source) {
+  analysisSource = String(source || '');
+  document.getElementById('analysisRendered').innerHTML = renderMarkdown(analysisSource);
+  document.getElementById('evalAnalysis').textContent = analysisSource;
+}
+
+function setAnalysisMode(mode) {
+  const rendered = mode === 'rendered';
+  document.getElementById('analysisRendered').classList.toggle('hidden', !rendered);
+  document.getElementById('evalAnalysis').classList.toggle('hidden', rendered);
+  document.getElementById('analysisRenderToggle').setAttribute('aria-pressed', String(rendered));
+  document.getElementById('analysisSourceToggle').setAttribute('aria-pressed', String(!rendered));
+}
+
 // ── Init ──
 
 async function init() {
-  const resp = await fetch('/api/config');
-  const cfg = await resp.json();
+  const selector = document.getElementById('nemotronDataset');
+  const meta = document.getElementById('datasetMeta');
+  const goBtn = document.getElementById('goBtn');
+  try {
+    const resp = await fetch('/api/config');
+    if (!resp.ok) throw new Error(`Configuration unavailable (${resp.status})`);
+    const cfg = await resp.json();
 
-  const badge = document.getElementById('configBadge');
-  if (cfg.has_api_key) {
-    badge.textContent = cfg.model;
-    badge.className = 'config-badge ok';
-    badge.style.display = '';
-  } else if (!cfg.is_spaces) {
-    badge.textContent = 'No API key';
-    badge.className = 'config-badge warn';
-    badge.style.display = '';
-    document.getElementById('apiKeySetup').classList.remove('hidden');
-  }
+    const badge = document.getElementById('configBadge');
+    if (cfg.has_api_key) {
+      badge.textContent = cfg.model;
+      badge.className = 'config-badge ok';
+      badge.style.display = '';
+    } else if (!cfg.is_spaces) {
+      badge.textContent = 'No API key';
+      badge.className = 'config-badge warn';
+      badge.style.display = '';
+      document.getElementById('apiKeySetup').classList.remove('hidden');
+    }
 
-  const nemBadge = document.getElementById('nemotronBadge');
-  if (cfg.nemotron_available) {
-    nemBadge.textContent = 'Nemotron 1M';
-    nemBadge.className = 'config-badge ok';
-    nemBadge.style.display = '';
-  } else if (!cfg.is_spaces) {
-    nemBadge.textContent = 'No panel data';
-    nemBadge.className = 'config-badge warn';
-    nemBadge.style.display = '';
+    personaDatasets = Array.isArray(cfg.persona_datasets) ? cfg.persona_datasets : [];
+    selector.innerHTML = personaDatasets.map(d => {
+      const count = d.count ? ` · ${Number(d.count).toLocaleString()}` : '';
+      const status = d.ready ? 'ready' : (d.id === 'generated' ? 'generate on demand' : 'needs loading');
+      return `<option value="${esc(d.id)}">${esc(d.label)}${count} · ${status}</option>`;
+    }).join('');
+    const defaultItem = personaDatasets.find(d => d.id === selectedDataset) || personaDatasets.find(d => d.default) || personaDatasets[0];
+    selectedDataset = defaultItem ? defaultItem.id : 'generated';
+    selector.value = selectedDataset;
+    selector.onchange = () => {
+      selectedDataset = selector.value;
+      document.getElementById('nemotronStatus').classList.add('hidden');
+      document.getElementById('nemotronProgressBar').style.background = '';
+      renderDatasetMeta();
+    };
     document.getElementById('nemotronSetup').classList.remove('hidden');
-    document.getElementById('nemotronPath').value = 'data/nemotron';
-  } else {
-    // On Spaces without data — show setup but hide folder field
+    if (cfg.is_spaces) document.getElementById('nemotronPathField').classList.add('hidden');
+    configReady = true;
+    goBtn.disabled = pipelineBusy;
+    renderDatasetMeta();
+  } catch (e) {
+    configReady = false;
+    selector.innerHTML = '<option>Configuration unavailable</option>';
+    selector.disabled = true;
     document.getElementById('nemotronSetup').classList.remove('hidden');
-    document.getElementById('nemotronPathField').classList.add('hidden');
+    meta.textContent = `Could not load dataset configuration: ${e.message}. Refresh to retry.`;
+    meta.className = 'dataset-meta error';
+    goBtn.disabled = true;
   }
 
   // Changes are auto-generated from evaluation concerns
+}
+
+function selectedDatasetRecord() {
+  return personaDatasets.find(d => d.id === selectedDataset) || {id: selectedDataset, label: selectedDataset};
+}
+
+function renderDatasetMeta(message = '') {
+  const record = selectedDatasetRecord();
+  const meta = document.getElementById('datasetMeta');
+  const button = document.getElementById('datasetLoadBtn');
+  const anchor = document.getElementById('datasetAnchor');
+  if (anchor) anchor.textContent = `Panel source: ${record.label || record.id} · Change`;
+  const count = record.count ? `${Number(record.count).toLocaleString()} personas` : 'count reported after loading';
+  if (record.id === 'generated') {
+    meta.textContent = 'Generated with your configured LLM for this run. No downloaded dataset is used.';
+    meta.className = 'dataset-meta ready';
+    button.classList.add('hidden');
+    button.disabled = true;
+    return;
+  }
+  button.classList.remove('hidden');
+  if (message) {
+    meta.textContent = message;
+  } else if (record.ready) {
+    meta.textContent = `${count} ready · installed locally`;
+  } else {
+    meta.textContent = `${count} · not installed yet. Load it to use this country.`;
+  }
+  meta.className = `dataset-meta ${record.ready ? 'ready' : ''}`;
+  button.textContent = record.ready ? 'Use local dataset' : 'Load selected dataset';
+  button.disabled = pipelineBusy;
 }
 
 function saveApiKey() {
@@ -841,9 +1032,12 @@ function saveApiKey() {
 }
 
 async function setupNemotron() {
-  const path = document.getElementById('nemotronPath').value.trim() || 'data/nemotron';
+  if (pipelineBusy) return;
   const dataset = document.getElementById('nemotronDataset').value;
-  const btn = document.querySelector('#nemotronSetup button');
+  if (dataset === 'generated') { selectedDataset = dataset; renderDatasetMeta(); return; }
+  const path = document.getElementById('nemotronPath').value.trim() || null;
+  const btn = document.getElementById('datasetLoadBtn');
+  setPipelineBusy(true, 'Dataset locked while loading.');
 
   btn.disabled = true;
   btn.textContent = 'Loading...';
@@ -851,7 +1045,8 @@ async function setupNemotron() {
   const text = document.getElementById('nemotronStatusText');
   const bar = document.getElementById('nemotronProgressBar');
   status.classList.remove('hidden');
-  text.textContent = `Loading ${dataset} personas — this may take 2-5 minutes on first run...`;
+  bar.style.background = '';
+  text.textContent = `Loading ${dataset} personas — the first run may take a few minutes...`;
   text.style.color = '';
 
   // Animate progress bar to show activity
@@ -868,20 +1063,20 @@ async function setupNemotron() {
       body: JSON.stringify({path, dataset}),
     });
     clearInterval(progressInterval);
-    const data = await resp.json();
+    const data = await resp.json().catch(() => ({}));
     if (!resp.ok) throw new Error(data.detail || 'Failed');
 
     bar.style.width = '100%';
-    text.textContent = `${data.count.toLocaleString()} ${dataset} personas ready`;
+    text.textContent = `${Number(data.count).toLocaleString()} ${dataset} personas ready`;
     text.style.color = 'var(--green)';
 
     const nemBadge = document.getElementById('nemotronBadge');
     nemBadge.textContent = `${dataset} personas`;
     nemBadge.className = 'config-badge ok';
 
-    setTimeout(() => {
-      document.getElementById('nemotronSetup').classList.add('hidden');
-    }, 2000);
+    selectedDataset = dataset;
+    await init();
+    renderDatasetMeta(`${Number(data.count).toLocaleString()} ${dataset} personas ready.`);
   } catch (e) {
     clearInterval(progressInterval);
     bar.style.width = '100%';
@@ -890,6 +1085,10 @@ async function setupNemotron() {
     text.style.color = 'var(--red)';
     btn.disabled = false;
     btn.textContent = 'Load personas';
+    renderDatasetMeta(`Could not load ${dataset}: ${e.message}`);
+  } finally {
+    setPipelineBusy(false);
+    renderDatasetMeta();
   }
 }
 
@@ -897,6 +1096,9 @@ async function setupNemotron() {
 
 function loadTemplate(name) {
   document.getElementById('entityText').value = TEMPLATES[name] || '';
+  if (!document.getElementById('entityPreview').classList.contains('hidden')) {
+    document.getElementById('entityPreview').innerHTML = renderMarkdown(document.getElementById('entityText').value);
+  }
 }
 
 // ── Step navigation ──
@@ -924,6 +1126,26 @@ function logStep(msg, cls = '') {
   const log = document.getElementById('evalLog');
   log.innerHTML += `<div class="${esc(cls)}">${esc(msg)}</div>`;
   log.scrollTop = log.scrollHeight;
+}
+
+function setPipelineBusy(busy, message = 'Dataset locked while a run is active.') {
+  pipelineBusy = busy;
+  const selector = document.getElementById('nemotronDataset');
+  const load = document.getElementById('datasetLoadBtn');
+  const run = document.getElementById('goBtn');
+  const path = document.getElementById('nemotronPath');
+  const note = document.getElementById('datasetLockNote');
+  if (selector) selector.disabled = busy;
+  if (load) load.disabled = busy;
+  if (run) run.disabled = busy || !configReady;
+  if (path) path.disabled = busy;
+  if (note) { note.textContent = message; note.classList.toggle('hidden', !busy); }
+}
+
+function showPipelineMessage(message, cls = 'err') {
+  document.getElementById('pipelineProgress').classList.remove('hidden');
+  document.getElementById('pipelineProgressText').textContent = message;
+  logStep(message, cls);
 }
 
 // ── Step 1: Full pipeline (one click) ──
@@ -967,11 +1189,38 @@ async function inferSpec() {
 }
 
 async function runFullPipeline() {
-  const text = document.getElementById('entityText').value.trim();
-  if (!text) return alert('Paste something for the panel to review first.');
+  if (pipelineBusy) {
+    showPipelineMessage('A dataset setup or panel review is already running. Wait for it to finish.');
+    return;
+  }
+  const text = document.getElementById('entityText').value;
+  if (!text.trim()) {
+    showPipelineMessage('Add the draft you want the panel to review, then try again.');
+    setEntityMode('edit');
+    document.getElementById('entityText').focus();
+    return;
+  }
+
+  const chosenDataset = selectedDatasetRecord();
+  if (chosenDataset.id !== 'generated' && !chosenDataset.ready) {
+    renderDatasetMeta(`${chosenDataset.label || chosenDataset.id} is not installed. Load it before starting a review.`);
+    document.getElementById('nemotronSetup').scrollIntoView({behavior: 'smooth', block: 'center'});
+    showPipelineMessage(`Load ${chosenDataset.label || chosenDataset.id} first, or choose LLM-generated personas.`);
+    return;
+  }
 
   const btn = document.getElementById('goBtn');
   btn.disabled = true;
+  const runDataset = selectedDataset;
+  setPipelineBusy(true);
+  evalResultsData = null;
+  lastGradientData = null;
+  currentCalibration = null;
+  document.getElementById('step2').classList.add('hidden');
+  document.getElementById('step3').classList.add('hidden');
+  document.getElementById('auditResults').classList.add('hidden');
+  document.getElementById('auditProgress').classList.add('hidden');
+  let timerInterval = null;
 
   const progress = document.getElementById('pipelineProgress');
   progress.classList.remove('hidden');
@@ -985,7 +1234,15 @@ async function runFullPipeline() {
   if (!goalField.value.trim() || !audienceField.value.trim()) {
     document.getElementById('pipelineProgressText').textContent = 'Understanding your goal and audience...';
     logStep('Understanding what you want to optimize and who should judge it...');
-    await inferSpec();
+    try {
+      await inferSpec();
+    } catch (e) {
+      document.getElementById('pipelineProgressText').textContent = `Error: ${e.message}`;
+      logStep(`Error: ${e.message}`, 'err');
+      btn.disabled = false;
+      setPipelineBusy(false);
+      return;
+    }
     if (goalField.value) logStep(`Goal: ${goalField.value}`, 'pos');
     if (audienceField.value) logStep(`Audience: ${audienceField.value}`, 'pos');
   }
@@ -1000,8 +1257,12 @@ async function runFullPipeline() {
     const sessResp = await fetch('/api/session', {
       method: 'POST',
       headers: llmHeaders(),
-      body: JSON.stringify({entity_text: text}),
+      body: JSON.stringify({entity_text: text, dataset: runDataset}),
     });
+    if (!sessResp.ok) {
+      const err = await sessResp.json().catch(() => ({}));
+      throw new Error(`Could not start review: ${err.detail || sessResp.status}`);
+    }
     const sessData = await sessResp.json();
     sessionId = sessData.session_id;
 
@@ -1014,7 +1275,7 @@ async function runFullPipeline() {
 
     // Start elapsed timer
     const startTime = Date.now();
-    const timerInterval = setInterval(() => {
+    timerInterval = setInterval(() => {
       const elapsed = Math.round((Date.now() - startTime) / 1000);
       const current = document.getElementById('pipelineProgressText').textContent;
       const base = current.replace(/ \(\d+s\)$/, '');
@@ -1059,7 +1320,7 @@ async function runFullPipeline() {
     const cohortResp = await fetch(apiUrl('/api/cohort/generate'), {
       method: 'POST',
       headers: llmHeaders(),
-      body: JSON.stringify({description: desc, audience_context: audienceCtx, segments, parallel: 3}),
+      body: JSON.stringify({description: desc, audience_context: audienceCtx, segments, parallel: 3, dataset: runDataset}),
     });
     if (!cohortResp.ok) {
       const err = await cohortResp.json().catch(() => ({}));
@@ -1068,13 +1329,17 @@ async function runFullPipeline() {
     const cohortData = await cohortResp.json();
 
     // Upload cohort to our session
-    await fetch(`/api/cohort/upload/${sessionId}`, {
+    const uploadResp = await fetch(`/api/cohort/upload/${sessionId}?dataset=${encodeURIComponent(runDataset)}`, {
       method: 'POST',
       headers: llmHeaders(),
       body: JSON.stringify(cohortData.cohort),
     });
+    if (!uploadResp.ok) {
+      const err = await uploadResp.json().catch(() => ({}));
+      throw new Error(`Could not save panel: ${err.detail || uploadResp.status}`);
+    }
 
-    const src = cohortData.source === 'nemotron' ? 'census-grounded (Nemotron)' : 'LLM-generated';
+    const src = cohortData.source_label || (cohortData.source === 'nemotron' ? 'census-grounded (Nemotron)' : 'LLM-generated');
     if (cohortData.filters && Object.keys(cohortData.filters).length > 0) {
       const f = cohortData.filters;
       const parts = [];
@@ -1123,6 +1388,12 @@ async function runFullPipeline() {
       es.addEventListener('complete', (e) => {
         es.close();
         const d = JSON.parse(e.data);
+        if (d.error) {
+          document.getElementById('pipelineProgressText').textContent = `Error: ${d.error}`;
+          logStep(`Error: ${d.error}`, 'err');
+          reject(new Error(d.error));
+          return;
+        }
         evalResultsData = d.results;
 
         document.getElementById('pipelineProgressBar').style.width = '100%';
@@ -1132,7 +1403,7 @@ async function runFullPipeline() {
         document.getElementById('posCount').textContent = d.positive;
         document.getElementById('neuCount').textContent = d.neutral;
         document.getElementById('negCount').textContent = d.negative;
-        document.getElementById('evalAnalysis').textContent = d.analysis;
+        setAnalysis(d.analysis);
         document.getElementById('evalResults').classList.remove('hidden');
 
         // Auto-apply calibration if user entered a metric value before running eval
@@ -1150,8 +1421,10 @@ async function runFullPipeline() {
     logStep(`Error: ${e.message}`, 'err');
   } finally {
     btn.disabled = false;
-    clearInterval(timerInterval);
+    if (timerInterval) clearInterval(timerInterval);
     document.getElementById('pipelineProgressBar').classList.remove('pulsing');
+    setPipelineBusy(false);
+    renderDatasetMeta();
   }
 }
 
@@ -1173,7 +1446,7 @@ async function runDirections() {
   document.getElementById('cfLog').innerHTML = '';
   document.getElementById('cfProgressBar').style.width = '5%';
 
-  const entityText = document.getElementById('entityText').value.trim();
+  const entityText = document.getElementById('entityText').value;
   const goal = document.getElementById('goalText').value.trim();
 
   try {
@@ -1349,8 +1622,9 @@ function renderGradientTable(results, changes, ranked, calibrated) {
     calSummaryEl = document.createElement('div');
     calSummaryEl.id = 'calSummary';
     calSummaryEl.style.cssText = 'font-size:0.85rem;margin-bottom:12px';
-    document.getElementById('gradientTable').parentElement.insertBefore(
-      calSummaryEl, document.getElementById('gradientTable'));
+    const gradientTable = document.getElementById('gradientTable');
+    const tableScroller = gradientTable.closest('.table-scroll') || gradientTable.parentElement;
+    tableScroller.parentElement.insertBefore(calSummaryEl, tableScroller);
   }
   if (hasCal && currentCalibration) {
     const mn = currentCalibration.metric_name || 'metric';
@@ -1652,6 +1926,16 @@ function downloadReport() {
   a.click();
   document.body.removeChild(a);
 }
+
+document.getElementById('entityEditToggle').addEventListener('click', () => setEntityMode('edit'));
+document.getElementById('entityPreviewToggle').addEventListener('click', () => setEntityMode('preview'));
+document.getElementById('entityText').addEventListener('input', () => {
+  if (!document.getElementById('entityPreview').classList.contains('hidden')) {
+    document.getElementById('entityPreview').innerHTML = renderMarkdown(document.getElementById('entityText').value);
+  }
+});
+document.getElementById('analysisRenderToggle').addEventListener('click', () => setAnalysisMode('rendered'));
+document.getElementById('analysisSourceToggle').addEventListener('click', () => setAnalysisMode('source'));
 
 // Boot
 init();

@@ -9,6 +9,8 @@ app_port: 7860
 
 # SGO — Semantic Gradient Optimization
 
+[中文说明：面向外贸企业负责人](README.zh-CN.md)
+
 You're launching a product. You think the landing page is good. But **who have you actually asked?**
 
 You could run a survey — but that takes weeks and you'd need to find the right people. You could ask an LLM — but one LLM opinion isn't a market. You could A/B test — but you need traffic first, and you don't know *what* to test.

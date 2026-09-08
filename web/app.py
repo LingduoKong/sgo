@@ -19,6 +19,8 @@ import asyncio
 import time
 import uuid
 import concurrent.futures
+import shutil
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -74,9 +76,14 @@ app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), na
 sessions: dict = {}
 SESSION_MAX_AGE_HOURS = 24
 
-# Nemotron dataset — loaded once if available
-_nemotron_ds = None
-_nemotron_checked = False
+# Nemotron datasets are identified and cached independently.  The old global
+# cache made it possible for a newly selected country to accidentally reuse the
+# USA table, so cache entries are keyed by the validated dataset id and path.
+_nemotron_cache: dict[tuple[str, str], object] = {}
+_nemotron_loading: dict[tuple[str, str], threading.Event] = {}
+_nemotron_cache_lock = threading.Lock()
+_setup_locks: dict[str, threading.Lock] = {}
+_setup_locks_guard = threading.Lock()
 
 NEMOTRON_SEARCH_PATHS = [
     Path("/data/nemotron"),  # HF Spaces persistent storage
@@ -86,37 +93,173 @@ NEMOTRON_SEARCH_PATHS = [
     Path(os.getenv("NEMOTRON_DATA_DIR", "/nonexistent")),
 ]
 
+DATASET_ROOT = Path("/data") if os.getenv("SPACE_ID") else PROJECT_ROOT / "data"
+_dataset_paths: dict[str, Path] = {}
 
-def find_nemotron_path():
-    """Find Nemotron dataset on disk. Returns path or None."""
-    for path in NEMOTRON_SEARCH_PATHS:
+
+class DatasetIdentityError(ValueError):
+    """A folder contains a different Nemotron country than requested."""
+
+
+def dataset_path(dataset: str) -> Path:
+    """Return the stable on-disk location for a known dataset id.
+
+    USA keeps the original ``data/nemotron`` location for backwards
+    compatibility. Every other country gets its own sibling directory.
+    """
+    if dataset not in NEMOTRON_DATASETS:
+        raise ValueError(f"Unknown dataset: {dataset}")
+    if dataset in _dataset_paths:
+        return _dataset_paths[dataset]
+    if dataset == "USA":
+        legacy = DATASET_ROOT / "nemotron"
+        if legacy.exists() or not (DATASET_ROOT / "nemotron-USA").exists():
+            return legacy
+    return DATASET_ROOT / f"nemotron-{dataset}"
+
+
+def _dataset_info(path: Path) -> dict:
+    try:
+        with (path / "dataset_info.json").open(encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _identity_tokens(info: dict) -> str:
+    values = [
+        info.get("dataset_name", ""), info.get("description", ""),
+        info.get("homepage", ""), info.get("config_name", ""),
+    ]
+    splits = info.get("splits", {})
+    if isinstance(splits, dict):
+        values.extend(str(v.get("dataset_name", "")) for v in splits.values() if isinstance(v, dict))
+    return " ".join(values).lower()
+
+
+def validate_dataset_identity(path: Path, dataset: str) -> dict:
+    """Validate metadata before a folder can be used or overwritten."""
+    if dataset not in NEMOTRON_DATASETS:
+        raise DatasetIdentityError(f"Unknown dataset '{dataset}'. Choose a listed country.")
+    info = _dataset_info(path)
+    if not info:
+        raise DatasetIdentityError(f"No readable dataset_info.json found at {path}.")
+    expected = NEMOTRON_DATASETS[dataset].lower()
+    expected_country = dataset.lower()
+    primary = [str(info.get("dataset_name", "")).lower()]
+    splits = info.get("splits", {})
+    if isinstance(splits, dict):
+        primary.extend(str(v.get("dataset_name", "")).lower() for v in splits.values() if isinstance(v, dict))
+    primary = [value for value in primary if value]
+    identity = " ".join(primary) if primary else _identity_tokens(info)
+    if expected not in identity and f"nemotron-personas-{expected_country}" not in identity:
+        found = info.get("dataset_name") or info.get("description") or "unknown dataset"
+        raise DatasetIdentityError(
+            f"This folder contains {found}, not {expected}. Choose a separate folder for {dataset}."
+        )
+    if dataset == "India":
+        state_path = path / "state.json"
+        if state_path.exists():
+            try:
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                state = {}
+            found_split = state.get("_split") if isinstance(state, dict) else None
+            expected_split = dataset_split_name(dataset)
+            if found_split != expected_split:
+                raise DatasetIdentityError(
+                    f"This India folder contains split {found_split or 'unknown'}, "
+                    f"but English requires {expected_split}. Choose a separate English dataset folder."
+                )
+    return info
+
+
+def _candidate_dataset_path(dataset: str) -> Path | None:
+    candidates = [dataset_path(dataset)]
+    if dataset == "USA":
+        candidates.extend(NEMOTRON_SEARCH_PATHS)
+    else:
+        candidates.extend([p.parent / f"nemotron-{dataset}" for p in NEMOTRON_SEARCH_PATHS])
+    seen = set()
+    for path in candidates:
+        path = Path(path)
+        if str(path) in seen:
+            continue
+        seen.add(str(path))
         if (path / "dataset_info.json").exists():
-            return path
+            try:
+                validate_dataset_identity(path, dataset)
+            except DatasetIdentityError:
+                log.warning("Ignoring mismatched %s dataset folder: %s", dataset, path)
+                continue
+            if _dataset_is_complete(path):
+                return path
     return None
 
 
-def get_nemotron(data_dir=None):
-    """Load Nemotron dataset. Returns None if not found."""
-    global _nemotron_ds, _nemotron_checked
-    if data_dir:
-        # Explicit path — reset cache
-        _nemotron_checked = False
-        _nemotron_ds = None
-        NEMOTRON_SEARCH_PATHS.insert(0, Path(data_dir))
+def _dataset_is_complete(path: Path) -> bool:
+    """Require state metadata whose every referenced shard exists."""
+    state_path = path / "state.json"
+    if not state_path.exists():
+        return False
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    files = state.get("_data_files") if isinstance(state, dict) else None
+    if not isinstance(files, list) or not files:
+        return False
+    names = [item.get("filename") for item in files if isinstance(item, dict)]
+    return bool(names) and all(isinstance(name, str) and (path / name).is_file() for name in names)
 
-    if _nemotron_checked:
-        return _nemotron_ds
 
-    _nemotron_checked = True
-    path = find_nemotron_path()
-    if path:
-        try:
-            _nemotron_ds = _lazy_persona_loader().load_personas(data_dir=path)
-            print(f"Nemotron loaded: {len(_nemotron_ds)} personas from {path}")
-            return _nemotron_ds
-        except Exception as e:
-            print(f"Failed to load Nemotron from {path}: {e}")
-    return None
+def find_nemotron_path(dataset: str = "USA"):
+    """Find a validated dataset path on disk. Returns path or None."""
+    return _candidate_dataset_path(dataset)
+
+
+def get_nemotron(dataset: str = "USA", data_dir=None):
+    """Load one validated dataset, caching by country and absolute path."""
+    path = Path(data_dir).expanduser().resolve() if data_dir else find_nemotron_path(dataset)
+    if path is None:
+        return None
+    validate_dataset_identity(path, dataset)
+    key = (dataset, str(path))
+    with _nemotron_cache_lock:
+        cached = _nemotron_cache.get(key)
+        if cached is not None:
+            return cached
+        loading = _nemotron_loading.get(key)
+        if loading is None:
+            loading = threading.Event()
+            _nemotron_loading[key] = loading
+            owner = True
+        else:
+            owner = False
+    if not owner:
+        loading.wait()
+        with _nemotron_cache_lock:
+            return _nemotron_cache.get(key)
+    try:
+        ds = _lazy_persona_loader().load_personas(data_dir=path)
+        with _nemotron_cache_lock:
+            _nemotron_cache[key] = ds
+        log.info("Nemotron %s loaded: %s personas from %s", dataset, len(ds), path)
+        return ds
+    except Exception as e:
+        log.warning("Failed to load Nemotron %s from %s: %s", dataset, path, e)
+        return None
+    finally:
+        with _nemotron_cache_lock:
+            event = _nemotron_loading.pop(key, None)
+            if event is not None:
+                event.set()
+
+
+def _setup_lock_for(path: Path) -> threading.Lock:
+    key = str(path)
+    with _setup_locks_guard:
+        return _setup_locks.setdefault(key, threading.Lock())
 
 
 # LLM client — uses per-request headers or server env vars. Never stored.
@@ -191,12 +334,41 @@ NEMOTRON_DATASETS = {
     "Brazil": "nvidia/Nemotron-Personas-Brazil",
     "France": "nvidia/Nemotron-Personas-France",
 }
+# India publishes multiple language splits; English is the least
+# surprising default for this English UI and keeps the selected identity clear.
+NEMOTRON_CONFIGS = {"India": "default"}
+NEMOTRON_LABELS = {"India": "India · English"}
+NEMOTRON_SPLITS = {"India": "en_IN"}
+
+
+def dataset_split_name(dataset: str) -> str:
+    return NEMOTRON_SPLITS.get(dataset, "train")
+
+
+def dataset_split_info(info: dict, dataset: str) -> dict:
+    splits = info.get("splits", {}) if isinstance(info, dict) else {}
+    if not isinstance(splits, dict):
+        return {}
+    return splits.get(dataset_split_name(dataset), {})
 
 
 # ── Models ────────────────────────────────────────────────────────────────
 
 class EntityInput(BaseModel):
     entity_text: str
+    dataset: str | None = None
+
+
+def dataset_metadata(dataset: str | None) -> dict:
+    if dataset == "generated":
+        return {"id": "generated", "label": "LLM-generated personas", "source": "llm-generated", "count": None}
+    if dataset in NEMOTRON_DATASETS:
+        path = find_nemotron_path(dataset)
+        info = _dataset_info(path) if path else {}
+        split = dataset_split_info(info, dataset)
+        return {"id": dataset, "label": NEMOTRON_LABELS.get(dataset, dataset), "source": "nemotron", "count": split.get("num_examples"),
+                "path": str(path) if path else str(dataset_path(dataset)), "ready": path is not None}
+    return {"id": dataset, "label": dataset or "Automatic", "source": "unknown", "count": None}
 
 
 class CohortConfig(BaseModel):
@@ -204,6 +376,7 @@ class CohortConfig(BaseModel):
     audience_context: str = ""
     segments: list[dict]  # [{"label": "...", "count": N}, ...]
     parallel: int = 3
+    dataset: str | None = None
 
 
 class EvalConfig(BaseModel):
@@ -242,16 +415,33 @@ async def index():
 
 @app.get("/api/config")
 async def get_config():
-    """Return current LLM config and Nemotron status."""
-    nem_path = find_nemotron_path()
+    """Return current LLM config and truthful per-dataset readiness."""
     has_key = bool(os.getenv("LLM_API_KEY"))  # server-level key only; per-session keys checked client-side
+    records = []
+    for dataset, hf_name in NEMOTRON_DATASETS.items():
+        path = find_nemotron_path(dataset)
+        info = _dataset_info(path) if path else {}
+        split = dataset_split_info(info, dataset)
+        records.append({
+            "id": dataset, "label": NEMOTRON_LABELS.get(dataset, dataset), "hf_name": hf_name,
+            "status": "ready" if path else "available", "ready": path is not None,
+            "count": split.get("num_examples") if isinstance(split, dict) else None,
+            "path": str(path) if path else str(dataset_path(dataset)),
+            "default": dataset == "USA", "source": "nemotron",
+        })
+    records.append({
+        "id": "generated", "label": "LLM-generated personas", "hf_name": None,
+        "status": "available", "ready": True, "count": None, "path": None,
+        "default": False, "source": "llm-generated",
+    })
+    usa = next(item for item in records if item["id"] == "USA")
     return {
         "model": get_model(),
         "has_api_key": has_key,
         "base_url": os.getenv("LLM_BASE_URL", ""),
-        "nemotron_available": nem_path is not None,
+        "nemotron_available": usa["ready"],
         "is_spaces": IS_SPACES,
-        "persona_datasets": list(NEMOTRON_DATASETS.keys()),
+        "persona_datasets": records,
     }
 
 
@@ -263,41 +453,97 @@ class SuggestChangesInput(BaseModel):
 
 
 class NemotronPathInput(BaseModel):
-    path: str = "/data/nemotron" if IS_SPACES else "data/nemotron"
+    path: str | None = None
     dataset: str = "USA"
 
 
 @app.post("/api/nemotron/setup")
 async def setup_nemotron(input: NemotronPathInput):
-    """Point to existing data, or download a Nemotron dataset to the given path."""
-    p = Path(input.path).expanduser().resolve()
+    """Load or download a country into its own validated directory."""
+    if input.dataset not in NEMOTRON_DATASETS:
+        raise HTTPException(400, f"Unknown dataset '{input.dataset}'. Choose a listed country.")
+    p = Path(input.path).expanduser().resolve() if input.path else dataset_path(input.dataset).resolve()
     # Prevent path traversal — must be within project or /tmp
-    if not (p.is_relative_to(PROJECT_ROOT) or p.is_relative_to(Path("/tmp")) or p.is_relative_to(Path("/data"))):
+    allowed_tmp = Path("/tmp").resolve()
+    if not (p.is_relative_to(PROJECT_ROOT.resolve()) or p.is_relative_to(allowed_tmp) or p.is_relative_to(Path("/data"))):
         raise HTTPException(403, "Path must be within the project directory")
-    hf_name = NEMOTRON_DATASETS.get(input.dataset, NEMOTRON_DATASETS["USA"])
+    hf_name = NEMOTRON_DATASETS[input.dataset]
+    setup_lock = _setup_lock_for(p)
+    if not setup_lock.acquire(blocking=False):
+        raise HTTPException(409, f"Dataset setup is already in progress for {p}. Try again shortly.")
 
-    if (p / "dataset_info.json").exists():
-        ds = get_nemotron(data_dir=str(p))
-        if ds is None:
-            raise HTTPException(500, "Failed to load dataset")
-        return {"status": "loaded", "path": str(p), "count": len(ds), "dataset": input.dataset}
-
-    # Download from HuggingFace
     try:
-        from datasets import load_dataset
-        print(f"Downloading {hf_name} ...")
-        ds = load_dataset(hf_name, split="train")
-        p.mkdir(parents=True, exist_ok=True)
-        ds.save_to_disk(str(p))
-        get_nemotron(data_dir=str(p))
-        return {"status": "downloaded", "path": str(p), "count": len(ds), "dataset": input.dataset}
-    except Exception as e:
-        raise HTTPException(500, f"Download failed: {e}")
+        if (p / "dataset_info.json").exists():
+            try:
+                validate_dataset_identity(p, input.dataset)
+            except DatasetIdentityError as e:
+                raise HTTPException(409, str(e))
+            if not _dataset_is_complete(p):
+                raise HTTPException(
+                    409,
+                    f"The existing {input.dataset} folder is incomplete at {p}. "
+                    "Choose a separate empty folder; existing data was preserved.",
+                )
+            ds = await asyncio.to_thread(get_nemotron, input.dataset, str(p))
+            if ds is None:
+                raise HTTPException(500, f"Failed to load {input.dataset} dataset; choose a separate folder to retry")
+            _dataset_paths[input.dataset] = p
+            return {"status": "loaded", "path": str(p), "count": len(ds), "dataset": input.dataset,
+                    "source": "nemotron", "label": NEMOTRON_LABELS.get(input.dataset, input.dataset)}
+
+        if p.exists() and (not p.is_dir() or any(p.iterdir())):
+            raise HTTPException(
+                409,
+                f"The target folder {p} already contains unrelated or incomplete data. "
+                "Choose a separate empty folder; existing data was preserved.",
+            )
+
+        # Download from HuggingFace into a sibling temporary directory, then atomically publish.
+        try:
+            from datasets import load_dataset
+            parent = p.parent
+            parent.mkdir(parents=True, exist_ok=True)
+            tmp = parent / f".{p.name}.download-{uuid.uuid4().hex[:8]}"
+            try:
+                split_name = dataset_split_name(input.dataset)
+                if input.dataset in NEMOTRON_CONFIGS:
+                    ds = await asyncio.to_thread(
+                        load_dataset, hf_name, NEMOTRON_CONFIGS[input.dataset], split=split_name
+                    )
+                else:
+                    ds = await asyncio.to_thread(load_dataset, hf_name, split=split_name)
+                await asyncio.to_thread(ds.save_to_disk, str(tmp))
+                validate_dataset_identity(tmp, input.dataset)
+                if not _dataset_is_complete(tmp):
+                    raise RuntimeError("Downloaded dataset is incomplete")
+                tmp.replace(p)
+            finally:
+                if tmp.exists():
+                    shutil.rmtree(tmp, ignore_errors=True)
+            loaded = await asyncio.to_thread(get_nemotron, input.dataset, str(p))
+            if loaded is None:
+                raise RuntimeError(f"Downloaded {input.dataset}, but loading it failed")
+            _dataset_paths[input.dataset] = p
+            return {"status": "downloaded", "path": str(p), "count": len(loaded), "dataset": input.dataset,
+                    "source": "nemotron", "label": NEMOTRON_LABELS.get(input.dataset, input.dataset)}
+        except Exception as e:
+            if isinstance(e, HTTPException):
+                raise
+            if isinstance(e, DatasetIdentityError):
+                raise HTTPException(409, str(e))
+            raise HTTPException(500, f"Could not load {input.dataset}: {e}")
+    finally:
+        setup_lock.release()
 
 
 @app.post("/api/session")
 async def create_session(entity: EntityInput):
     """Create a new evaluation session with an entity."""
+    if entity.dataset and entity.dataset != "generated":
+        if entity.dataset not in NEMOTRON_DATASETS:
+            raise HTTPException(400, f"Unknown dataset '{entity.dataset}'. Choose a listed country or generated.")
+        if find_nemotron_path(entity.dataset) is None:
+            raise HTTPException(409, f"{entity.dataset} is not installed. Load it from the dataset panel first.")
     sid = uuid.uuid4().hex[:12]
     log.info(f"New session {sid} ({len(entity.entity_text)} chars)")
     sessions[sid] = {
@@ -312,6 +558,7 @@ async def create_session(entity: EntityInput):
         "bias_audit": None,
         "calibration": None,
         "created": datetime.now().isoformat(),
+        "dataset": dataset_metadata(entity.dataset) if entity.dataset else None,
     }
     return {"session_id": sid}
 
@@ -441,6 +688,7 @@ async def get_session(sid: str):
         "cohort_size": len(s["cohort"]) if s["cohort"] else 0,
         "has_eval": s["eval_results"] is not None,
         "has_gradient": s["gradient"] is not None,
+        "dataset": s.get("dataset"),
     }
 
 
@@ -577,32 +825,58 @@ Be concrete and relevant — no generic segments."""
         raise HTTPException(500, f"Failed to suggest segments: {e}")
 
 
-def extract_filters(client, model, audience_context, entity_text=""):
-    """Use LLM to extract structured Nemotron filters from audience context."""
+def _dataset_sample_values(ds, columns: set[str], sample_size: int = 32) -> dict[str, list[str]]:
+    """Collect short scalar examples without scanning a full dataset."""
+    try:
+        sample = ds.select(range(min(sample_size, len(ds))))
+    except (AttributeError, TypeError, ValueError):
+        return {}
+    values = {}
+    for column in sorted(columns):
+        try:
+            raw_values = sample[column]
+        except (KeyError, TypeError, ValueError):
+            continue
+        seen = []
+        for value in raw_values:
+            if value is None or isinstance(value, (dict, list, tuple)):
+                continue
+            text = str(value)
+            if len(text) > 80 or text in seen:
+                continue
+            seen.append(text)
+            if len(seen) >= 8:
+                break
+        if seen:
+            values[column] = seen
+    return values
+
+
+def extract_filters(client, model, audience_context, entity_text="", schema=None,
+                    dataset="USA", columns=None, sample_values=None):
+    """Use the selected dataset's native columns and values to extract filters."""
     if not audience_context.strip():
         return {}
-
-    prompt = f"""Extract structured demographic filters from this audience description.
-Only include filters that are explicitly stated or clearly implied.
-
-Audience: {audience_context}
-Entity context: {entity_text[:500]}
-
-Return JSON with ONLY the fields that apply (omit fields that aren't specified):
-{{
-    "sex": "Male" or "Female",
-    "age_min": <number>,
-    "age_max": <number>,
-    "state": "<2-letter state code, e.g. IL for Illinois>",
-    "city": "<city name substring>",
-    "education_level": ["bachelors", "graduate", ...],
-    "occupation": "<occupation substring>"
-}}
-
-If the audience is "engineers in Texas aged 25-40", return:
-{{"state": "TX", "age_min": 25, "age_max": 40, "occupation": "engineer"}}
-
-If nothing specific is stated, return {{}}."""
+    columns = set(columns or schema or ())
+    sample_values = sample_values or {}
+    schema_line = ", ".join(sorted(columns)) or "none"
+    examples = "\n".join(
+        f"- {name}: {', '.join(values)}" for name, values in sorted(sample_values.items())
+    ) or "(no scalar examples available)"
+    prompt = (
+        "Extract structured demographic filters from this audience description.\n"
+        "Only include filters explicitly stated or clearly implied.\n\n"
+        f"Selected dataset: {dataset}\n"
+        f"Available columns: {schema_line}\n"
+        "Observed scalar values (use exact native spelling, including native sex values):\n"
+        f"{examples}\n\n"
+        f"Audience: {audience_context}\n"
+        f"Entity context: {entity_text[:500]}\n\n"
+        "Return JSON only. Keys must be available columns above, plus age_min and age_max. "
+        "Use the actual geography column names (for example prefecture, region, area, "
+        "commune, departement, district, or state) instead of inventing city/state keys. "
+        "Omit unspecified fields."
+    )
 
     try:
         resp = client.chat.completions.create(
@@ -615,32 +889,62 @@ If nothing specific is stated, return {{}}."""
         content = resp.choices[0].message.content
         content = re.sub(r'<think>[\s\S]*?</think>', '', content).strip()
         filters = json.loads(content)
-        # Clean empty values
-        return {k: v for k, v in filters.items() if v is not None and v != "" and v != []}
+        # Clean empty values and discard model keys outside the selected schema.
+        clean = {k: v for k, v in filters.items() if v is not None and v != "" and v != []}
+        if columns:
+            clean = {k: v for k, v in clean.items() if k in columns or k in {"age_min", "age_max"}}
+        return clean
     except Exception:
         return {}
 
 
 @app.post("/api/cohort/generate")
 async def generate_cohort_endpoint(config: CohortConfig, request: Request):
-    """Generate a cohort — from Nemotron if available, else LLM-generated."""
+    """Generate a cohort from the requested source without silent substitution."""
     total = sum(s.get("count", 8) for s in config.segments)
     log.info(f"Generate cohort: {total} personas, {len(config.segments)} segments")
 
-    ds = get_nemotron()
+    filters = {}
+    selected = config.dataset
+    if selected == "generated":
+        ds = None
+    elif selected:
+        if selected not in NEMOTRON_DATASETS:
+            raise HTTPException(400, f"Unknown dataset '{selected}'. Choose a listed country or generated.")
+        if find_nemotron_path(selected) is None:
+            raise HTTPException(409, f"{selected} is not installed. Load it from the dataset panel first.")
+        ds = await asyncio.to_thread(get_nemotron, selected)
+        if ds is None:
+            raise HTTPException(503, f"{selected} is installed but could not be loaded. Try loading it again.")
+    else:
+        selected = "USA" if find_nemotron_path("USA") else "generated"
+        ds = await asyncio.to_thread(get_nemotron, "USA") if selected == "USA" else None
     if ds is not None:
         # Use census-grounded Nemotron personas
         import random
         pl = _lazy_persona_loader()
         ss = _lazy_stratified_sampler()
 
-        # Extract structured filters from audience context
+        # Extract structured filters from the selected dataset's native schema.
+        columns = set(getattr(ds, "column_names", []))
+        sample_values = _dataset_sample_values(ds, columns)
         client, model = llm_from_request(request)
-        filters = extract_filters(client, get_fast_model(), config.audience_context, config.description)
+        filters = extract_filters(
+            client, get_fast_model(), config.audience_context, config.description,
+            dataset=selected, columns=columns, sample_values=sample_values,
+        )
         print(f"Nemotron filters from audience context: {filters}")
 
-        filtered = pl.filter_personas(ds, filters, limit=max(total * 20, 2000))
-        profiles = [pl.to_profile(row, i) for i, row in enumerate(filtered)]
+        unsupported = [key for key in filters if key not in columns and key not in {"age_min", "age_max"}]
+        if unsupported:
+            raise HTTPException(400, "Selected dataset does not support these audience filters: " + ", ".join(unsupported))
+        try:
+            filtered = pl.filter_personas(ds, filters, limit=max(total * 20, 2000))
+        except (KeyError, TypeError) as e:
+            raise HTTPException(400, f"Selected dataset cannot apply the requested audience filters: {e}")
+        if len(filtered) == 0:
+            raise HTTPException(400, "The selected dataset has no personas matching those filters. Broaden the audience.")
+        profiles = [pl.to_profile(row, i, dataset=selected) for i, row in enumerate(filtered)]
 
         # Use only age + education to keep strata count < total
         dim_fns = [
@@ -678,15 +982,19 @@ async def generate_cohort_endpoint(config: CohortConfig, request: Request):
     return {
         "cohort_size": len(all_personas),
         "cohort": all_personas, "source": source,
+        "dataset": selected,
+        "source_label": dataset_metadata(selected)["label"],
         "filters": filters if ds is not None else None,
     }
 
 
 @app.post("/api/cohort/upload/{sid}")
-async def upload_cohort(sid: str, cohort: list[dict]):
+async def upload_cohort(sid: str, cohort: list[dict], dataset: str | None = Query(None)):
     if sid not in sessions:
         raise HTTPException(404, "Session not found")
     sessions[sid]["cohort"] = cohort
+    if dataset:
+        sessions[sid]["dataset"] = dataset_metadata(dataset)
     return {"cohort_size": len(cohort)}
 
 
@@ -720,6 +1028,7 @@ async def evaluate_stream(sid: str, request: Request, parallel: int = 5,
         yield {"event": "start", "data": json.dumps({
             "total": total, "model": mdl,
             "bias_calibration": bias_calibration,
+            "dataset": session.get("dataset"),
         })}
 
         results = [None] * total
@@ -755,7 +1064,7 @@ async def evaluate_stream(sid: str, request: Request, parallel: int = 5,
         session["eval_results"] = results
 
         analysis = analyze_eval(results)
-        valid = [r for r in results if "score" in r]
+        valid = [r for r in results if isinstance(r.get("score"), (int, float)) and not isinstance(r.get("score"), bool)]
         scores = [r["score"] for r in valid]
         avg = sum(scores) / len(scores) if scores else 0
         actions = [r["action"] for r in valid]
@@ -769,7 +1078,10 @@ async def evaluate_stream(sid: str, request: Request, parallel: int = 5,
             "negative": actions.count("negative"),
             "analysis": analysis,
             "results": results,
+            "dataset": session.get("dataset"),
         }
+        if not scores:
+            summary["error"] = "No valid numeric scores from evaluators"
         yield {"event": "complete", "data": json.dumps(summary)}
 
     return EventSourceResponse(event_generator(), ping=15)
@@ -966,24 +1278,24 @@ async def bias_audit_stream(
             t0 = time.time()
 
             if probe_name == "framing":
-                gain_entity = reframe_entity(client, model, entity_text, "gain")
-                loss_entity = reframe_entity(client, model, entity_text, "loss")
+                gain_entity = reframe_entity(client, mdl, entity_text, "gain")
+                loss_entity = reframe_entity(client, mdl, entity_text, "loss")
                 results = run_paired_evaluation(
-                    client, model, evaluators, gain_entity, loss_entity,
+                    client, mdl, evaluators, gain_entity, loss_entity,
                     "gain", "loss", parallel,
                 )
                 label_a, label_b = "gain", "loss"
             elif probe_name == "authority":
                 entity_with_auth = add_authority_signals(entity_text)
                 results = run_paired_evaluation(
-                    client, model, evaluators, entity_text, entity_with_auth,
+                    client, mdl, evaluators, entity_text, entity_with_auth,
                     "baseline", "authority", parallel,
                 )
                 label_a, label_b = "baseline", "authority"
             elif probe_name == "order":
                 reordered = reorder_entity(entity_text)
                 results = run_paired_evaluation(
-                    client, model, evaluators, entity_text, reordered,
+                    client, mdl, evaluators, entity_text, reordered,
                     "original", "reordered", parallel,
                 )
                 label_a, label_b = "original", "reordered"
@@ -1021,6 +1333,7 @@ async def get_results(sid: str):
         "eval_results": s["eval_results"],
         "gradient": s["gradient"],
         "cohort": s["cohort"],
+        "dataset": s.get("dataset"),
     }
 
 
@@ -1047,6 +1360,11 @@ async def download_report(sid: str):
         lines.append(f"**Goal:** {s['goal']}\n")
     if s.get("audience"):
         lines.append(f"**Audience:** {s['audience']}\n")
+    if s.get("dataset"):
+        dataset = s["dataset"]
+        source_label = dataset.get("label", dataset.get("id", "Unknown"))
+        count = dataset.get("count")
+        lines.append(f"**Persona source:** {source_label}" + (f" ({count:,} available)" if count else "") + "\n")
 
     # Cohort summary
     cohort = s.get("cohort") or []

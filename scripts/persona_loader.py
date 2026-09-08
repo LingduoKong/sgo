@@ -47,12 +47,10 @@ def filter_personas(ds, filters: dict, limit: int = None, seed: int = 42):
     """
     Filter dataset by arbitrary field conditions.
 
-    Supported filter keys:
-        sex, state, city (substring match), age_min, age_max,
-        marital_status (list), education_level (list),
-        occupation (substring match)
-
-    Any unrecognized key is treated as an exact match on that column.
+    Generic keys are exact matches on their corresponding dataset columns.
+    ``state`` and ``city`` also work as generic aliases across the country
+    variants' geography columns. Sex is always compared exactly so native
+    values such as Japan's 男/女 are preserved.
     """
     random.seed(seed)
 
@@ -70,24 +68,47 @@ def filter_personas(ds, filters: dict, limit: int = None, seed: int = 42):
     if isinstance(education, str):
         education = [education]
 
+    columns = set(getattr(ds, "column_names", []))
+    state_columns = [name for name in ("state", "region", "departement") if name in columns]
+    city_columns = [name for name in ("city", "commune", "prefecture", "district", "area", "planning_area", "municipality") if name in columns]
+    handled = {"sex", "age_min", "age_max", "state", "city", "marital_status", "education_level", "occupation"}
+
+    def exact_match(value, expected):
+        if isinstance(expected, (list, tuple, set)):
+            return value in expected
+        return value == expected
+
     def matches(row):
-        if sex and row["sex"] != sex:
+        if sex and row.get("sex") != sex:
             return False
-        if not (age_min <= row["age"] <= age_max):
+        age = row.get("age")
+        if ("age_min" in filters or "age_max" in filters) and age is None:
             return False
-        if state and row["state"] != state:
+        if age is not None and not (age_min <= age <= age_max):
             return False
-        if city and city.lower() not in row["city"].lower():
+        if state and not any(row.get(name) == state for name in state_columns):
             return False
-        if marital and row["marital_status"] not in marital:
+        if city and not any(city.lower() in str(row.get(name) or "").lower() for name in city_columns):
             return False
-        if education and row["education_level"] not in education:
+        if marital and row.get("marital_status") not in marital:
             return False
-        if occupation and occupation.lower() not in row["occupation"].lower():
+        if education and row.get("education_level") not in education:
             return False
+        if occupation and occupation.lower() not in str(row.get("occupation") or "").lower():
+            return False
+        for key, expected in filters.items():
+            if key in handled:
+                continue
+            if key not in columns or not exact_match(row.get(key), expected):
+                return False
         return True
 
-    filtered = ds.filter(matches, num_proc=4)
+    # Tiny/interactive datasets do not need worker processes, and single
+    # process filtering is safer in restricted server environments.
+    if len(ds) < 10_000:
+        filtered = ds.filter(matches)
+    else:
+        filtered = ds.filter(matches, num_proc=4)
 
     if limit and len(filtered) > limit:
         indices = random.sample(range(len(filtered)), limit)
@@ -127,7 +148,7 @@ def parse_json_list(raw) -> list:
         return []
 
 
-def to_profile(row: dict, user_id: int) -> dict:
+def to_profile(row: dict, user_id: int, dataset: str = None) -> dict:
     """Convert a Nemotron row into a generic evaluator profile dict."""
     name = extract_name(row)
     hobbies = parse_json_list(row.get("hobbies_and_interests_list", "[]"))
@@ -139,9 +160,9 @@ def to_profile(row: dict, user_id: int) -> dict:
         "persona": build_persona_text(row),
         "age": row.get("age", 30),
         "sex": row.get("sex", ""),
-        "city": row.get("city", ""),
-        "state": row.get("state", ""),
-        "country": row.get("country", "USA"),
+        "city": row.get("city") or row.get("commune") or row.get("prefecture") or row.get("district") or row.get("planning_area") or row.get("municipality") or row.get("area", ""),
+        "state": row.get("state") or row.get("region") or row.get("departement", ""),
+        "country": row.get("country") or row.get("国") or dataset or "USA",
         "education_level": row.get("education_level", ""),
         "marital_status": row.get("marital_status", ""),
         "occupation": (row.get("occupation") or "").replace("_", " ").title(),
