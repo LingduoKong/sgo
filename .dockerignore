@@ -25,3 +25,8 @@ deploy/datasets-installed.json
 *.key
 *.log
 .release-*
+
+# macOS filesystem metadata is not source code.
+.DS_Store
+._*
+**/._*

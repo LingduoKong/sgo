@@ -22,3 +22,8 @@ entities/
 
 # Live evaluation outputs stay local; publish only code and automated tests.
 /docs/testing/
+
+# macOS filesystem metadata is not source code.
+.DS_Store
+._*
+**/._*
