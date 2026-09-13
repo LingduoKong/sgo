@@ -27,17 +27,22 @@ from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, JSONResponse
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
+import sys
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from openai import OpenAI
+import httpx
+from contextvars import ContextVar
+from web.llm_safety import LimitedClient
+_model_auth = ContextVar("model_auth", default=None)
 
 # Import core functions from existing scripts
-import sys
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 from evaluate import evaluate_one, analyze as analyze_eval, SYSTEM_PROMPT, BIAS_CALIBRATION_ADDENDUM
 from counterfactual import probe_one, analyze_gradient, build_changes_block, compute_goal_weights
@@ -69,11 +74,16 @@ import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
 log = logging.getLogger("sgo")
 
-app = FastAPI(title="SGO — Semantic Gradient Optimization")
+app = FastAPI(title="SGO — Semantic Gradient Optimization", docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 # In-memory store for active sessions
 sessions: dict = {}
+
+# Authentication is always enabled; missing configuration fails closed.
+from web.security import SecurityMiddleware
+from web.auth import AuthError
+app.add_middleware(SecurityMiddleware, sessions=sessions, model_context=_model_auth)
 SESSION_MAX_AGE_HOURS = 24
 
 # Nemotron datasets are identified and cached independently.  The old global
@@ -262,14 +272,26 @@ def _setup_lock_for(path: Path) -> threading.Lock:
         return _setup_locks.setdefault(key, threading.Lock())
 
 
-# LLM client — uses per-request headers or server env vars. Never stored.
+# LLM client — server-managed configuration only.
 
 def get_client(api_key=None, base_url=None):
     key = api_key or os.getenv("LLM_API_KEY")
     base = base_url or os.getenv("LLM_BASE_URL")
     if not key:
-        raise HTTPException(400, "No API key configured. Enter your key above.")
-    return OpenAI(api_key=key, base_url=base, timeout=45, max_retries=2)
+        raise HTTPException(503, "Model service is not configured. Contact the administrator.")
+    # Browser clients cannot change the destination; do not follow redirects.
+    client = OpenAI(api_key=key, base_url=base, timeout=45, max_retries=0,
+                    http_client=httpx.Client(follow_redirects=False, timeout=45, trust_env=False))
+    context = _model_auth.get()
+    if context:
+        auth, token = context
+        def charge():
+            user = auth.user(token)
+            if not user:
+                raise AuthError("Login expired or revoked", 401)
+            auth.model_call(user['email'])
+        return LimitedClient(client, charge)
+    return client
 
 
 def get_model(model=None):
@@ -290,34 +312,6 @@ def _llm_from_params(api_key: str = "", base_url: str = "", model: str = ""):
         get_client(api_key=api_key or None, base_url=base_url or None),
         get_model(model=model or None),
     )
-
-
-# Rate limiting — per-IP pipeline run counter (not per LLM call)
-_rate_limits: dict = {}  # ip -> {"count": N, "reset": timestamp}
-RATE_LIMIT_MAX_RUNS = 2  # pipeline runs (evaluate, counterfactual, bias audit) per window
-RATE_LIMIT_WINDOW = 3600  # 1 hour
-
-
-def _check_rate_limit(ip: str):
-    """Raise 429 if IP has exceeded pipeline run limit."""
-    now = time.time()
-    entry = _rate_limits.get(ip)
-    if not entry or now > entry["reset"]:
-        _rate_limits[ip] = {"count": 1, "reset": now + RATE_LIMIT_WINDOW}
-        return
-    if entry["count"] >= RATE_LIMIT_MAX_RUNS:
-        remaining = int(entry["reset"] - now)
-        raise HTTPException(429, f"Rate limit: {RATE_LIMIT_MAX_RUNS} runs per hour. Try again in {remaining // 60}m.")
-    entry["count"] += 1
-
-
-@app.middleware("http")
-async def inject_llm_config(request: Request, call_next):
-    """Read LLM creds from custom headers (not Authorization — HF proxy intercepts that)."""
-    request.state.api_key = request.headers.get("x-llm-key", "")
-    request.state.base_url = request.headers.get("x-llm-base", "")
-    request.state.model = request.headers.get("x-llm-model", "")
-    return await call_next(request)
 
 
 def llm_from_request(request: Request):
@@ -372,16 +366,17 @@ def dataset_metadata(dataset: str | None) -> dict:
 
 
 class CohortConfig(BaseModel):
+    session_id: str | None = None
     description: str
     audience_context: str = ""
     segments: list[dict]  # [{"label": "...", "count": N}, ...]
-    parallel: int = 3
+    parallel: int = 2
     dataset: str | None = None
 
 
 class EvalConfig(BaseModel):
     session_id: str
-    parallel: int = 5
+    parallel: int = 2
 
 
 class CounterfactualConfig(BaseModel):
@@ -389,7 +384,7 @@ class CounterfactualConfig(BaseModel):
     changes: list[dict]  # [{"id": "...", "label": "...", "description": "..."}, ...]
     min_score: int = 4
     max_score: int = 7
-    parallel: int = 5
+    parallel: int = 2
 
 
 class CalibrationAnchor(BaseModel):
@@ -404,6 +399,53 @@ class CalibrationInput(BaseModel):
 class SuggestSegmentsInput(BaseModel):
     entity_text: str
     audience_context: str
+
+
+class LoginEmail(BaseModel):
+    email: str
+
+class LoginCode(LoginEmail):
+    code: str
+
+@app.exception_handler(AuthError)
+async def auth_error_handler(request: Request, error: AuthError):
+    return JSONResponse({"detail": str(error)}, status_code=error.status,
+                        headers={"Retry-After": str(error.retry_after)} if error.retry_after else None)
+
+@app.get("/healthz")
+async def health():
+    return {"status": "ok"}
+
+@app.get("/login")
+async def login_page():
+    return FileResponse(Path(__file__).parent / "static" / "login.html")
+
+@app.post("/auth/request-code")
+async def request_login_code(input: LoginEmail, request: Request):
+    await asyncio.to_thread(request.state.auth.request_code, input.email, request.client.host)
+    return {"message": "如果该邮箱已获准访问，你将收到验证码。"}
+
+@app.post("/auth/verify")
+async def verify_login_code(input: LoginCode, request: Request):
+    token = await asyncio.to_thread(request.state.auth.verify, input.email, input.code, request.client.host)
+    response = JSONResponse({"ok": True})
+    response.set_cookie(request.state.cookie_name, token, max_age=86400, httponly=True,
+                        secure=request.state.secure_cookie, samesite="strict", path="/")
+    return response
+
+@app.get("/auth/me")
+async def current_login(request: Request):
+    if not request.state.user:
+        raise HTTPException(401, "Login required")
+    return request.state.user
+
+@app.post("/auth/logout")
+async def logout(request: Request):
+    request.state.auth.logout(request.cookies.get(request.state.cookie_name))
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(request.state.cookie_name, path="/", httponly=True,
+                           secure=request.state.secure_cookie, samesite="strict")
+    return response
 
 
 # ── Routes ────────────────────────────────────────────────────────────────
@@ -531,23 +573,31 @@ async def setup_nemotron(input: NemotronPathInput):
                 raise
             if isinstance(e, DatasetIdentityError):
                 raise HTTPException(409, str(e))
-            raise HTTPException(500, f"Could not load {input.dataset}: {e}")
+            raise HTTPException(500, "Dataset could not be loaded. Contact the administrator.")
     finally:
         setup_lock.release()
 
 
 @app.post("/api/session")
-async def create_session(entity: EntityInput):
+async def create_session(entity: EntityInput, request: Request = None):
     """Create a new evaluation session with an entity."""
     if entity.dataset and entity.dataset != "generated":
         if entity.dataset not in NEMOTRON_DATASETS:
             raise HTTPException(400, f"Unknown dataset '{entity.dataset}'. Choose a listed country or generated.")
         if find_nemotron_path(entity.dataset) is None:
             raise HTTPException(409, f"{entity.dataset} is not installed. Load it from the dataset panel first.")
-    sid = uuid.uuid4().hex[:12]
+    owner = request.state.user["email"] if request else None
+    expired = [sid for sid, item in sessions.items() if time.time() - item.get("created_ts", 0) >= 86400]
+    for sid in expired:
+        sessions.pop(sid, None)
+    if len(sessions) >= 100 or sum(item.get("owner") == owner for item in sessions.values()) >= 10:
+        raise HTTPException(429, "Too many active reviews. Try again tomorrow.")
+    sid = uuid.uuid4().hex
     log.info(f"New session {sid} ({len(entity.entity_text)} chars)")
     sessions[sid] = {
         "id": sid,
+        "owner": owner,
+        "created_ts": time.time(),
         "entity_text": entity.entity_text,
         "goal": "",
         "audience": "",
@@ -747,7 +797,7 @@ async def suggest_changes(input: SuggestChangesInput, request: Request):
     model = get_fast_model()
 
     concerns_text = "\n".join(f"- {c}" for c in input.concerns[:15])
-    prompt = f"""Based on these evaluation results, suggest 3-5 specific, actionable changes.
+    prompt = f"""Based on these evaluation results, suggest at most 3 specific, actionable changes.
 
 Entity (first 1000 chars):
 {input.entity_text[:1000]}
@@ -865,7 +915,7 @@ def extract_filters(client, model, audience_context, entity_text="", schema=None
     ) or "(no scalar examples available)"
     prompt = (
         "Extract structured demographic filters from this audience description.\n"
-        "Only include filters explicitly stated or clearly implied.\n\n"
+        "Include only explicitly stated constraints. Do not infer sex, geography, age, education, or occupational proxies from a profession or product. Observed values are examples, not defaults. If a role has no exact dataset equivalent, omit the occupation filter; never substitute an unrelated role or not_in_workforce.\n\n"
         f"Selected dataset: {dataset}\n"
         f"Available columns: {schema_line}\n"
         "Observed scalar values (use exact native spelling, including native sex values):\n"
@@ -875,7 +925,7 @@ def extract_filters(client, model, audience_context, entity_text="", schema=None
         "Return JSON only. Keys must be available columns above, plus age_min and age_max. "
         "Use the actual geography column names (for example prefecture, region, area, "
         "commune, departement, district, or state) instead of inventing city/state keys. "
-        "Omit unspecified fields."
+        "Return {\"filters\": {field: value}, \"evidence\": {field: exact_quote_from_Audience}}. Every filter needs a verbatim supporting quote from Audience (not Entity context or examples). Omit unspecified fields. Use empty objects if no explicit constraints exist."
     )
 
     try:
@@ -883,24 +933,64 @@ def extract_filters(client, model, audience_context, entity_text="", schema=None
             model=model,
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
-            max_tokens=256,
+            max_tokens=1024,
             temperature=0.2,
         )
         content = resp.choices[0].message.content
         content = re.sub(r'<think>[\s\S]*?</think>', '', content).strip()
-        filters = json.loads(content)
-        # Clean empty values and discard model keys outside the selected schema.
-        clean = {k: v for k, v in filters.items() if v is not None and v != "" and v != []}
-        if columns:
-            clean = {k: v for k, v in clean.items() if k in columns or k in {"age_min", "age_max"}}
+        payload = json.loads(content)
+        if not isinstance(payload, dict) or "filters" not in payload or "evidence" not in payload:
+            raise ValueError("Invalid filter response")
+        filters = payload.get("filters", {})
+        evidence = payload.get("evidence", {})
+        if not isinstance(filters, dict) or not isinstance(evidence, dict):
+            raise ValueError("Invalid filter objects")
+        def normalized(value):
+            return " ".join(re.findall(r"\w+", str(value).casefold().replace("_", " ")))
+        aliases = {
+            "male": ("male", "men", "males", "男性", "男"),
+            "female": ("female", "women", "females", "女性", "女"),
+            "男": ("male", "men", "男性", "男"),
+            "女": ("female", "women", "女性", "女"),
+            "ca": ("ca", "california"), "usa": ("usa", "us", "united states"),
+            "関東": ("関東", "kanto", "kantō"),
+        }
+        clean = {}
+        for key, value in filters.items():
+            quote = evidence.get(key)
+            if not isinstance(quote, str) or not quote.strip():
+                continue
+            occurrence = re.search(r"(?<![A-Za-z0-9])" + re.escape(quote) + r"(?![A-Za-z0-9])", audience_context, re.IGNORECASE)
+            if occurrence is None:
+                continue
+            if key in {"age_min", "age_max"}:
+                nearby = normalized(audience_context[max(0, occurrence.start()-20):occurrence.end()+20])
+                if not re.search(r"\bage(?:d|s)?\b|years? old|岁|年龄", nearby):
+                    continue
+            if columns and key not in columns and key not in {"age_min", "age_max"}:
+                continue
+            if key in {"age_min", "age_max"} and (type(value) is not int or not 0 <= value <= 120):
+                continue
+            values = value if isinstance(value, list) else [value]
+            if not values or any(not isinstance(item, (str, int)) or isinstance(item, bool) for item in values):
+                continue
+            quote_words = " " + normalized(quote) + " "
+            if all(any(" " + normalized(alias) + " " in quote_words for alias in aliases.get(normalized(item), (item,))) for item in values):
+                clean[key] = value
         return clean
     except Exception:
-        return {}
+        raise HTTPException(502, "Could not interpret audience filters. Please retry; no broader population was substituted.") from None
 
 
 @app.post("/api/cohort/generate")
 async def generate_cohort_endpoint(config: CohortConfig, request: Request):
-    """Generate a cohort from the requested source without silent substitution."""
+    """Generate a cohort and optionally attach it directly to its owner's review."""
+    target = None
+    if config.session_id:
+        target = sessions.get(config.session_id)
+        user = getattr(request.state, "user", None)
+        if not target or not user or target.get("owner") != user["email"]:
+            raise HTTPException(404, "Session not found")
     total = sum(s.get("count", 8) for s in config.segments)
     log.info(f"Generate cohort: {total} personas, {len(config.segments)} segments")
 
@@ -933,7 +1023,7 @@ async def generate_cohort_endpoint(config: CohortConfig, request: Request):
             client, get_fast_model(), config.audience_context, config.description,
             dataset=selected, columns=columns, sample_values=sample_values,
         )
-        print(f"Nemotron filters from audience context: {filters}")
+        log.info("Dataset audience filters generated")
 
         unsupported = [key for key in filters if key not in columns and key not in {"age_min", "age_max"}]
         if unsupported:
@@ -943,7 +1033,7 @@ async def generate_cohort_endpoint(config: CohortConfig, request: Request):
         except (KeyError, TypeError) as e:
             raise HTTPException(400, f"Selected dataset cannot apply the requested audience filters: {e}")
         if len(filtered) == 0:
-            raise HTTPException(400, "The selected dataset has no personas matching those filters. Broaden the audience.")
+            raise HTTPException(400, "No dataset personas match this audience. Choose LLM-generated personas or revise the audience filters.")
         profiles = [pl.to_profile(row, i, dataset=selected) for i, row in enumerate(filtered)]
 
         # Use only age + education to keep strata count < total
@@ -966,22 +1056,39 @@ async def generate_cohort_endpoint(config: CohortConfig, request: Request):
         all_personas = []
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=config.parallel) as pool:
+            # Two profiles fit the web client's 2,048-token response budget.
+            batches = [(seg, min(2, seg["count"] - start), start // 2 + 1)
+                       for seg in config.segments for start in range(0, seg["count"], 2)]
             futs = {
-                pool.submit(generate_segment, client, model,
-                            seg["label"], seg["count"], config.description): seg
-                for seg in config.segments
+                pool.submit(generate_segment, client, model, seg["label"], count,
+                            f"{config.description}\nPanel batch {batch}: use varied names and backgrounds."): count
+                for seg, count, batch in batches
             }
             for fut in concurrent.futures.as_completed(futs):
                 personas = fut.result()
-                all_personas.extend(personas)
+                if isinstance(personas, list):
+                    all_personas.extend(dict(p) for p in personas[:futs[fut]] if isinstance(p, dict))
         source = "llm-generated"
 
+    # Model output can overproduce profiles; honor the requested panel size.
+    all_personas = all_personas[:min(total, 50)]
+    if not all_personas or any(not isinstance(persona, dict) for persona in all_personas):
+        raise HTTPException(502, "No usable personas returned. Please try again.")
     for i, p in enumerate(all_personas):
         p["user_id"] = i
 
+    if target is not None:
+        if sessions.get(config.session_id) is not target:
+            raise HTTPException(409, "Review expired while building the panel. Start a new review.")
+        target["cohort"] = all_personas
+        target["dataset"] = dataset_metadata(selected)
+
     return {
         "cohort_size": len(all_personas),
-        "cohort": all_personas, "source": source,
+        "cohort_saved": target is not None,
+        "matching_note": "Dataset sampling uses explicit demographic filters; professional-role matching is not guaranteed." if ds is not None else None,
+        **({} if target is not None else {"cohort": all_personas}),
+        "source": source,
         "dataset": selected,
         "source_label": dataset_metadata(selected)["label"],
         "filters": filters if ds is not None else None,
@@ -1001,10 +1108,10 @@ async def upload_cohort(sid: str, cohort: list[dict], dataset: str | None = Quer
 # ── SSE streaming endpoints ──────────────────────────────────────────────
 
 @app.get("/api/evaluate/stream/{sid}")
-async def evaluate_stream(sid: str, request: Request, parallel: int = 5,
+async def evaluate_stream(sid: str, request: Request, parallel: int = 2,
                           bias_calibration: bool = False):
     """Run evaluation with Server-Sent Events for real-time progress."""
-    _check_rate_limit(request.client.host)
+    # Persistent per-user quotas are enforced at the ASGI boundary.
     log.info(f"Evaluate stream {sid}")
     if sid not in sessions:
         raise HTTPException(404, "Session not found")
@@ -1092,7 +1199,7 @@ class CounterfactualRequest(BaseModel):
     goal: str = ""
     min_score: int = 4
     max_score: int = 7
-    parallel: int = 5
+    parallel: int = 2
 
 
 # Store pending counterfactual configs for SSE pickup (with timestamps)
@@ -1104,12 +1211,14 @@ async def prepare_counterfactual(sid: str, req: CounterfactualRequest):
     """Stage counterfactual config, return a ticket for the SSE stream."""
     if sid not in sessions:
         raise HTTPException(404, "Session not found")
-    ticket = uuid.uuid4().hex[:8]
+    ticket = uuid.uuid4().hex
     # Clean expired tickets (>10 min)
     now = time.time()
     expired = [k for k, v in _cf_pending.items() if now - v.get("ts", 0) > 600]
     for k in expired:
         del _cf_pending[k]
+    if len(_cf_pending) >= 100 or sum(v.get("sid") == sid for v in _cf_pending.values()) >= 3:
+        raise HTTPException(429, "Too many pending comparisons")
     _cf_pending[ticket] = {"req": req, "ts": now, "sid": sid}
     return {"ticket": ticket}
 
@@ -1117,14 +1226,14 @@ async def prepare_counterfactual(sid: str, req: CounterfactualRequest):
 @app.get("/api/counterfactual/stream/{sid}")
 async def counterfactual_stream(sid: str, ticket: str, request: Request):
     """Run counterfactual probes with SSE progress."""
-    _check_rate_limit(request.client.host)
+    # Persistent per-user quotas are enforced at the ASGI boundary.
     if sid not in sessions:
         raise HTTPException(404, "Session not found")
     session = sessions[sid]
     if not session["eval_results"]:
         raise HTTPException(400, "Run evaluation first")
     entry = _cf_pending.pop(ticket, None)
-    if not entry:
+    if not entry or time.time() - entry.get("ts", 0) >= 600:
         raise HTTPException(400, "Invalid or expired ticket")
     if entry.get("sid") != sid:
         raise HTTPException(403, "Ticket does not belong to this session")
@@ -1239,10 +1348,10 @@ async def counterfactual_stream(sid: str, ticket: str, request: Request):
 @app.get("/api/bias-audit/stream/{sid}")
 async def bias_audit_stream(
     sid: str, request: Request, probes: str = "framing,authority,order",
-    sample: int = 10, parallel: int = 5
+    sample: int = 5, parallel: int = 2
 ):
     """Run bias audit probes with SSE progress."""
-    _check_rate_limit(request.client.host)
+    # Persistent per-user quotas are enforced at the ASGI boundary.
     parallel = min(parallel, 10)
     if sid not in sessions:
         raise HTTPException(404, "Session not found")
@@ -1503,7 +1612,7 @@ if __name__ == "__main__":
     import uvicorn
 
     port = int(os.getenv("PORT", "7860" if IS_SPACES else "8000"))
-    host = "0.0.0.0" if IS_SPACES else "127.0.0.1"
+    host = os.getenv("HOST", "127.0.0.1")
 
     print(f"\n  SGO Web Interface")
     print(f"  http://{host}:{port}\n")

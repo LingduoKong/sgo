@@ -409,6 +409,7 @@
 </style>
 </head>
 <body>
+<div style="display:flex;gap:16px;justify-content:flex-end;padding:16px 24px;font-size:12px"><span id="signedInEmail"></span><span>登录有效期 24 小时</span><button id="logoutButton" type="button">退出登录</button></div>
 
 <div class="container">
   <header>
@@ -476,7 +477,7 @@
 
     <div class="step" id="panelSettings">
       <div class="sidebar-kicker">Run settings</div>
-      <div class="field"><label for="panelSize">Panel size</label><input type="number" id="panelSize" value="30" min="5" max="80"></div>
+      <div class="field"><label for="panelSize">Panel size</label><input type="number" id="panelSize" value="5" min="1" max="50"></div>
       <label style="display:flex;align-items:center;gap:8px;margin:0;font-size:.78rem"><input type="checkbox" id="biasCalibration" checked style="width:auto;margin:0"> Reduce framing effects</label>
     </div>
     </aside>
@@ -637,7 +638,7 @@
       <div style="flex:1"></div>
       <label style="display:flex;align-items:center;gap:6px;margin:0">
         <span style="font-size:0.8rem;color:var(--text2)">Sample size:</span>
-        <input type="number" id="auditSample" value="10" min="1" max="50"
+        <input type="number" id="auditSample" value="3" min="1" max="5"
                style="width:60px;padding:6px;text-align:center">
       </label>
     </div>
@@ -672,6 +673,7 @@
 </div>
 </div>
 
+<script src="/static/access.js"></script>
 <script src="/static/vendor/marked.min.js"></script>
 <script src="/static/vendor/purify.min.js"></script>
 <script>
@@ -951,7 +953,7 @@ async function init() {
       badge.textContent = 'No API key';
       badge.className = 'config-badge warn';
       badge.style.display = '';
-      document.getElementById('apiKeySetup').classList.remove('hidden');
+      badge.textContent = '模型尚未配置，请联系管理员';
     }
 
     personaDatasets = Array.isArray(cfg.persona_datasets) ? cfg.persona_datasets : [];
@@ -1248,7 +1250,8 @@ async function runFullPipeline() {
   }
 
   const biasCal = document.getElementById('biasCalibration').checked;
-  const panelSize = parseInt(document.getElementById('panelSize').value) || 30;
+  const panelSize = Math.min(50, Math.max(1, parseInt(document.getElementById('panelSize').value) || 5));
+  document.getElementById('panelSize').value = panelSize;
   const audienceCtx = audienceField.value.trim();
 
   try {
@@ -1301,12 +1304,13 @@ async function runFullPipeline() {
       throw new Error(`Failed to choose segments: ${err.detail || segResp.status}`);
     }
     const segData = await segResp.json();
-    const segments = segData.segments || [];
+    const segments = (segData.segments || []).slice(0, Math.min(panelSize, 10));
+    if (!segments.length) throw new Error("No audience segments returned. Try again.");
 
-    // Scale segment counts to match requested panel size
-    const totalSuggested = segments.reduce((a, s) => a + (s.count || 8), 0);
-    const scale = panelSize / (totalSuggested || 1);
-    segments.forEach(s => { s.count = Math.max(2, Math.round((s.count || 8) * scale)); });
+    // Exact small panel allocation: never round up beyond the requested size.
+    segments.forEach((segment, i) => {
+      segment.count = Math.floor(panelSize / segments.length) + (i < panelSize % segments.length ? 1 : 0);
+    });
 
     segments.forEach(s => logStep(`  Added segment: ${s.label} (${s.count} people)`));
     logStep(`${segments.length} segments chosen`, 'pos');
@@ -1320,7 +1324,7 @@ async function runFullPipeline() {
     const cohortResp = await fetch(apiUrl('/api/cohort/generate'), {
       method: 'POST',
       headers: llmHeaders(),
-      body: JSON.stringify({description: desc, audience_context: audienceCtx, segments, parallel: 3, dataset: runDataset}),
+      body: JSON.stringify({session_id: sessionId, description: desc, audience_context: audienceCtx, segments, parallel: 2, dataset: runDataset}),
     });
     if (!cohortResp.ok) {
       const err = await cohortResp.json().catch(() => ({}));
@@ -1328,17 +1332,12 @@ async function runFullPipeline() {
     }
     const cohortData = await cohortResp.json();
 
-    // Upload cohort to our session
-    const uploadResp = await fetch(`/api/cohort/upload/${sessionId}?dataset=${encodeURIComponent(runDataset)}`, {
-      method: 'POST',
-      headers: llmHeaders(),
-      body: JSON.stringify(cohortData.cohort),
-    });
-    if (!uploadResp.ok) {
-      const err = await uploadResp.json().catch(() => ({}));
-      throw new Error(`Could not save panel: ${err.detail || uploadResp.status}`);
+    // The server saves the generated panel directly to this user's review.
+    if (!cohortData.cohort_saved) {
+      throw new Error('Panel was not saved. Refresh the page and try again.');
     }
 
+    if (cohortData.matching_note) logStep(cohortData.matching_note, 'neu');
     const src = cohortData.source_label || (cohortData.source === 'nemotron' ? 'census-grounded (Nemotron)' : 'LLM-generated');
     if (cohortData.filters && Object.keys(cohortData.filters).length > 0) {
       const f = cohortData.filters;
@@ -1352,7 +1351,7 @@ async function runFullPipeline() {
     }
     logStep(`${cohortData.cohort_size} panel members ready — ${src}`, 'pos');
     if (panelSize < 40) {
-      logStep(`Tip: a panel of 40-60 gives more reliable results across segments`, 'neu');
+      logStep('Test mode: small panels keep API usage low.', 'neu');
     }
     document.getElementById('pipelineProgressBar').style.width = '35%';
 
@@ -1361,8 +1360,8 @@ async function runFullPipeline() {
     logStep('Running the panel review — each member scores what you wrote...');
 
     await new Promise((resolve, reject) => {
-      const params = new URLSearchParams({parallel: 5, bias_calibration: biasCal});
-      const es = new EventSource(`/api/evaluate/stream/${sessionId}?${params}`);
+      const params = new URLSearchParams({parallel: 2, bias_calibration: biasCal});
+      const es = new SGOEventSource(`/api/evaluate/stream/${sessionId}?${params}`);
 
       es.addEventListener('start', (e) => {
         const d = JSON.parse(e.data);
@@ -1475,7 +1474,8 @@ async function runDirections() {
       body: JSON.stringify({entity_text: entityText, goal, concerns}),
     });
     const suggestData = await suggestResp.json();
-    suggestedChanges = suggestData.changes || [];
+    if (!suggestResp.ok) throw new Error(suggestData.detail || "Could not suggest changes");
+    suggestedChanges = (suggestData.changes || []).slice(0, 3);
 
     suggestedChanges.forEach(c => {
       log.innerHTML += `<div class="pos">Change: ${esc(c.label)} — ${esc(c.description)}</div>`;
@@ -1495,13 +1495,13 @@ async function runDirections() {
         goal: goal,
         min_score: 4,
         max_score: 7,
-        parallel: 5,
+        parallel: 2,
       }),
     });
     const {ticket} = await prepResp.json();
 
     await new Promise((resolve, reject) => {
-      const es = new EventSource(`/api/counterfactual/stream/${sessionId}?ticket=${ticket}`);
+      const es = new SGOEventSource(`/api/counterfactual/stream/${sessionId}?ticket=${ticket}`);
 
       es.addEventListener('start', (e) => {
         const d = JSON.parse(e.data);
@@ -1667,7 +1667,7 @@ function renderGradientTable(results, changes, ranked, calibrated) {
 
     // Summary row (clickable)
     tbody.innerHTML += `
-      <tr onclick="document.getElementById('${rowId}').classList.toggle('hidden')" style="cursor:pointer">
+      <tr data-toggle-row="${rowId}" style="cursor:pointer">
         <td>${i + 1}</td>
         <td>
           <div style="font-weight:600">${esc(r.label)}</div>
@@ -1723,7 +1723,7 @@ function runBiasAudit() {
   if (document.getElementById('probeOrder').checked) probes.push('order');
   if (probes.length === 0) return alert('Select at least one probe.');
 
-  const sample = parseInt(document.getElementById('auditSample').value) || 10;
+  const sample = Math.min(5, Math.max(1, parseInt(document.getElementById('auditSample').value) || 3));
   const btn = document.getElementById('auditBtn');
   btn.disabled = true;
 
@@ -1733,8 +1733,8 @@ function runBiasAudit() {
   let probesDone = 0;
   const totalProbes = probes.length;
 
-  const params = new URLSearchParams({probes: probes.join(','), sample, parallel: 5});
-  const es = new EventSource(`/api/bias-audit/stream/${sessionId}?${params}`);
+  const params = new URLSearchParams({probes: probes.join(','), sample, parallel: 2});
+  const es = new SGOEventSource(`/api/bias-audit/stream/${sessionId}?${params}`);
 
   es.addEventListener('start', (e) => {
     const d = JSON.parse(e.data);

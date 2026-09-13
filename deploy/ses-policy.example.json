@@ -1,0 +1,22 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "ses:SendEmail",
+      "Resource": [
+        "arn:aws:ses:us-west-2:ACCOUNT_ID:identity/example.com",
+        "arn:aws:ses:us-west-2:ACCOUNT_ID:identity/admin@example.com",
+        "arn:aws:ses:us-west-2:ACCOUNT_ID:identity/member@example.com"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "ses:FromAddress": "login@example.com"
+        },
+        "IpAddress": {
+          "aws:SourceIp": "203.0.113.10/32"
+        }
+      }
+    }
+  ]
+}

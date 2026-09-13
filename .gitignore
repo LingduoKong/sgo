@@ -5,3 +5,20 @@ __pycache__/
 data/
 results/
 entities/
+
+# Private environment, credentials, and per-installation state
+.env.*
+!.env.example
+*.pem
+*.key
+*.sqlite*
+*.db
+*.log
+/deploy/local/
+/deploy/state.json
+/deploy/ses-policy.json
+/deploy/datasets-installed.json
+.release-*
+
+# Live evaluation outputs stay local; publish only code and automated tests.
+/docs/testing/

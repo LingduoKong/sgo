@@ -151,6 +151,14 @@ def stratified_sample(profiles, dim_fns, total=50, diversity_fn=None, seed=42):
                     break
             selected.extend(chosen)
 
+    # Rounding and exhausted strata may leave spare slots; fill without repeats.
+    target = min(max(total, 0), len(profiles))
+    if len(selected) > target:
+        selected = random.sample(selected, target)
+    elif len(selected) < target:
+        chosen_ids = {id(profile) for profile in selected}
+        available = [profile for profile in profiles if id(profile) not in chosen_ids]
+        selected.extend(random.sample(available, min(target-len(selected), len(available))))
     return selected
 
 

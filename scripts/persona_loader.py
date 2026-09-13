@@ -79,22 +79,22 @@ def filter_personas(ds, filters: dict, limit: int = None, seed: int = 42):
         return value == expected
 
     def matches(row):
-        if sex and row.get("sex") != sex:
+        if sex and not exact_match(row.get("sex"), sex):
             return False
         age = row.get("age")
         if ("age_min" in filters or "age_max" in filters) and age is None:
             return False
         if age is not None and not (age_min <= age <= age_max):
             return False
-        if state and not any(row.get(name) == state for name in state_columns):
+        if state and not any(exact_match(row.get(name), state) for name in state_columns):
             return False
-        if city and not any(city.lower() in str(row.get(name) or "").lower() for name in city_columns):
+        if city and not any(str(item).lower() in str(row.get(name) or "").lower() for item in (city if isinstance(city, list) else [city]) for name in city_columns):
             return False
         if marital and row.get("marital_status") not in marital:
             return False
         if education and row.get("education_level") not in education:
             return False
-        if occupation and occupation.lower() not in str(row.get("occupation") or "").lower():
+        if occupation and not any(str(item).lower() in str(row.get("occupation") or "").lower() for item in (occupation if isinstance(occupation, list) else [occupation])):
             return False
         for key, expected in filters.items():
             if key in handled:

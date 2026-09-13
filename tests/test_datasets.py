@@ -219,7 +219,7 @@ class DatasetRegistryTests(unittest.TestCase):
 
     def test_extract_filters_prompt_uses_selected_dataset_columns_and_values(self):
         class Message:
-            content = "{\"sex\": \"男\", \"region\": \"関東\"}"
+            content = '{"filters":{"sex":"男","region":"関東"},"evidence":{"sex":"men","region":"Kanto"}}'
 
         class Response:
             choices = [type("Choice", (), {"message": Message()})()]
@@ -301,8 +301,7 @@ class DatasetRegistryTests(unittest.TestCase):
             return [item async for item in response.body_iterator]
 
         try:
-            with patch.object(appmod, "_check_rate_limit"), \
-                 patch.object(appmod, "_llm_from_params", return_value=(object(), "selected-model")), \
+            with patch.object(appmod, "_llm_from_params", return_value=(object(), "selected-model")), \
                  patch.object(appmod, "evaluate_one", return_value={"error": "provider failed"}):
                 events = asyncio.run(collect())
         finally:

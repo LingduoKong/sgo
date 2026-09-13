@@ -1,5 +1,3 @@
-#!/bin/bash
-# Kill any process holding port 7860
-kill $(lsof -t -i:7860 2>/dev/null) 2>/dev/null || true
-sleep 1
-exec python -u web/app.py
+#!/bin/sh
+set -eu
+exec python -m uvicorn web.app:app --host "${HOST:-127.0.0.1}" --port "${PORT:-8000}" --workers 1 --no-access-log --no-proxy-headers --limit-concurrency 32

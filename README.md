@@ -4,7 +4,7 @@ emoji: 📊
 colorFrom: indigo
 colorTo: purple
 sdk: docker
-app_port: 7860
+app_port: 8000
 ---
 
 # SGO — Semantic Gradient Optimization
@@ -347,3 +347,7 @@ Only probe changes you'd actually make:
 ## License
 
 MIT
+
+## Private web deployment
+
+The web app requires an email allowlist and SES login codes; missing authentication settings fail closed. See [AWS deployment and key management](docs/AWS-DEPLOYMENT.md). Never commit `.env`, credentials, or installation-specific allowlists. Panels support up to 50 personas; model-call quotas still apply. Live evaluation reports remain local. Automated tests are in `tests/`; the optional live batch runner is `tests/run_template50_live.py`.

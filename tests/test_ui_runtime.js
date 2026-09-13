@@ -49,7 +49,7 @@ vm.runInContext(`personaDatasets = [{id: 'USA', label: 'USA', ready: true, defau
 
 for (const [id, value] of Object.entries({
   entityText: 'Draft text', goalText: 'Improve response', cohortDesc: 'Reviewers',
-  nemotronDataset: 'USA',
+  nemotronDataset: 'USA', panelSize: '80',
 })) document.getElementById(id).value = value;
 
 assert.match(context.marked.parse('# Heading\n\n**bold**', {breaks: true}), /<h1[^>]*>Heading/);
@@ -68,6 +68,7 @@ Promise.resolve(context.setupNemotron()).then(() => context.runFullPipeline()).t
   context.setPipelineBusy(false);
   return context.runFullPipeline();
 }).then(() => {
+  assert.equal(Number(document.getElementById('panelSize').value), 50, 'display the enforced panel size');
   assert.equal(document.getElementById('goBtn').disabled, false, 'CTA unlocks after failure');
   assert.equal(document.getElementById('nemotronDataset').disabled, false, 'dataset selector unlocks after failure');
   assert.equal(document.getElementById('datasetLoadBtn').disabled, false, 'dataset action unlocks after failure');

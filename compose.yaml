@@ -1,0 +1,63 @@
+services:
+  app:
+    build:
+      context: .
+      args:
+        VCS_REF: ${SGO_RELEASE_REVISION:-unknown}
+    restart: unless-stopped
+    command: ["python", "-m", "uvicorn", "web.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--no-access-log", "--proxy-headers", "--forwarded-allow-ips", "172.30.89.2", "--limit-concurrency", "32", "--timeout-keep-alive", "5"]
+    networks:
+      private_app:
+        ipv4_address: 172.30.89.3
+    env_file: .env
+    environment:
+      APP_ORIGIN: https://${SGO_DOMAIN:?Set SGO_DOMAIN}
+      AUTH_DB_PATH: /app/data/private/auth.sqlite3
+      HF_HOME: /app/data/hf
+    volumes:
+      - app_data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 1400m
+    cpus: 1.5
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '2'
+  proxy:
+    image: caddy:2.10.2-alpine
+    networks:
+      private_app:
+        ipv4_address: 172.30.89.2
+    restart: unless-stopped
+    environment:
+      SGO_DOMAIN: ${SGO_DOMAIN:?Set SGO_DOMAIN}
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [app]
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '2'
+volumes:
+  app_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  private_app:
+    ipam:
+      config:
+        - subnet: 172.30.89.0/24

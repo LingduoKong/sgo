@@ -1,0 +1,18 @@
+{
+    admin off
+    servers {
+        timeouts {
+            read_header 10s
+            read_body 15s
+            idle 60s
+        }
+    }
+}
+{$SGO_DOMAIN} {
+    request_body {
+        max_size 64KB
+    }
+    reverse_proxy app:8000 {
+        flush_interval -1
+    }
+}
