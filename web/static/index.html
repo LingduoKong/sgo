@@ -1464,6 +1464,7 @@ async function runDirections() {
       log.innerHTML += `<div style="color:var(--text2)">Concern: ${esc(c)}</div>`;
     });
     log.innerHTML += `<div>${concerns.length} concerns from ${persuadable.length} on-the-fence panel members</div>`;
+    if (concerns.length > 15) log.innerHTML += `<div>Using the first 15 of ${concerns.length} concerns for this test.</div>`;
     document.getElementById('cfProgressBar').style.width = '15%';
 
     // Phase 2: LLM generates candidate changes from concerns
@@ -1471,7 +1472,7 @@ async function runDirections() {
     const suggestResp = await fetch(apiUrl('/api/suggest-changes'), {
       method: 'POST',
       headers: llmHeaders(),
-      body: JSON.stringify({entity_text: entityText, goal, concerns}),
+      body: JSON.stringify({entity_text: entityText, goal, concerns: concerns.slice(0, 15)}),
     });
     const suggestData = await suggestResp.json();
     if (!suggestResp.ok) throw new Error(suggestData.detail || "Could not suggest changes");
@@ -1713,6 +1714,11 @@ function renderGradientTable(results, changes, ranked, calibrated) {
   });
 }
 
+function streamFailureMessage(event) {
+  try { return JSON.parse(event.data).message || 'Connection lost — try again later'; }
+  catch (_) { return 'Connection lost — try again later'; }
+}
+
 // ── Step 5: Bias Audit ──
 
 function runBiasAudit() {
@@ -1754,15 +1760,19 @@ function runBiasAudit() {
     document.getElementById('auditProgressBar').style.width = pct + '%';
     const d = JSON.parse(e.data);
     document.getElementById('auditProgressText').textContent =
-      `${d.probe}: ${d.analysis.shifted_pct}% shifted (${probesDone}/${totalProbes} probes done)`;
+      d.analysis.error ? `${d.probe}: ${d.analysis.error}` : `${d.probe}: ${d.analysis.shifted_pct}% shifted (${probesDone}/${totalProbes} probes done)`;
   });
 
   es.addEventListener('complete', (e) => {
     es.close();
     const d = JSON.parse(e.data);
 
-    document.getElementById('auditProgressBar').style.width = '100%';
-    document.getElementById('auditProgressText').textContent = 'Audit complete';
+    const validCount = d.analyses.filter(a => !a.error).length;
+    const completeCount = d.analyses.filter(a => !a.error && !a.failed_pairs).length;
+    const complete = completeCount === totalProbes && !d.error;
+    document.getElementById('auditProgressBar').style.width = `${Math.round(completeCount / totalProbes * 100)}%`;
+    document.getElementById('auditProgressText').textContent = complete ? 'Audit complete' :
+      `${validCount ? 'Audit partially completed' : 'Audit failed'}: ${d.error || 'No valid results'}`;
 
     const tbody = document.querySelector('#auditTable tbody');
     tbody.innerHTML = '';
@@ -1776,7 +1786,9 @@ function runBiasAudit() {
       const expected = baselines[a.probe];
       const gap = a.shifted_pct - (expected || 0);
       let assessment, assessCls;
-      if (expected !== undefined) {
+      if (a.failed_pairs) {
+        assessment = `Incomplete sample: ${a.failed_pairs} failed`; assessCls = 'color:var(--yellow)';
+      } else if (expected !== undefined) {
         if (gap > 10) { assessment = 'Over-biased'; assessCls = 'color:var(--red)'; }
         else if (gap < -10) { assessment = 'Under-biased'; assessCls = 'color:var(--yellow)'; }
         else { assessment = 'Well-calibrated'; assessCls = 'color:var(--green)'; }
@@ -1799,7 +1811,7 @@ function runBiasAudit() {
     document.getElementById('auditResults').classList.remove('hidden');
 
     // If over-biased, auto-check the bias calibration checkbox
-    const hasOverBias = d.analyses.some(a => a.shifted_pct - (baselines[a.probe] || 0) > 10);
+    const hasOverBias = complete && d.analyses.some(a => a.shifted_pct - (baselines[a.probe] || 0) > 10);
     if (hasOverBias) {
       document.getElementById('biasCalibration').checked = true;
     }
@@ -1807,9 +1819,9 @@ function runBiasAudit() {
     btn.disabled = false;
   });
 
-  es.onerror = () => {
+  es.onerror = (event) => {
     es.close();
-    document.getElementById('auditProgressText').textContent = 'Connection lost — you can try again without losing your draft';
+    document.getElementById('auditProgressText').textContent = streamFailureMessage(event);
     btn.disabled = false;
   };
 }

@@ -156,10 +156,31 @@ class AuthStore:
         with self.db() as db:
             db.execute('DELETE FROM logins WHERE digest=?', (self.digest(token or ''),))
 
+    def _check_model_budget(self, db, email, needed):
+        if not isinstance(needed, int) or needed < 1:
+            raise ValueError('Expected a positive model-call estimate')
+        now = self.clock()
+        for key, maximum in ((f'model:{email}', 100), ('model-global', 300)):
+            row = db.execute('SELECT count,expires FROM limits WHERE key=?', (key,)).fetchone()
+            active = row is not None and row['expires'] > now
+            remaining = maximum - row['count'] if active else maximum
+            if remaining < needed:
+                retry = max(1, math.ceil(row['expires'] - now)) if active else 86400
+                scope = 'Your' if key.startswith('model:') else 'Site-wide'
+                raise AuthError(f'Model-call budget insufficient. {scope} remaining calls: {remaining}; '
+                                f'this operation needs {needed}. Retry in {math.ceil(retry/60)} minutes.',
+                                429, retry)
+
+    def check_model_budget(self, email, needed):
+        """Read-only preflight; actual calls still reserve their quota atomically."""
+        with self.db() as db:
+            self._check_model_budget(db, email, needed)
+
     def model_call(self, email):
         with self.db() as db:
             if not db.execute('SELECT 1 FROM users WHERE email=?', (email,)).fetchone():
                 raise AuthError('Access revoked', 401)
+            self._check_model_budget(db, email, 1)
             self._limits(db, [(f'model:{email}', 100, 86400), ('model-global', 300, 86400)])
 
     def charge(self, email, heavy=False):

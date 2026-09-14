@@ -25,6 +25,7 @@ Output: results/bias_audit/report.md + raw data
 """
 
 import json
+import math
 import os
 import re
 import time
@@ -122,6 +123,9 @@ def evaluate_one(client, model, evaluator, entity_text):
             return {"error": "Empty response"}
         content = re.sub(r'<think>[\s\S]*?</think>', '', content).strip()
         result = json.loads(content)
+        score = result.get('score') if isinstance(result, dict) else None
+        if isinstance(score, bool) or not isinstance(score, (int, float)) or not math.isfinite(score) or not 1 <= score <= 10:
+            return {'error': 'Model returned an invalid or missing score', '_evaluator': {'name': evaluator.get('name', '?')}}
         result["_evaluator"] = {
             "name": evaluator["name"],
             "age": evaluator.get("age"),
@@ -232,7 +236,7 @@ def run_paired_evaluation(client, model, evaluators, entity_a, entity_b, label_a
                 print(f"  [{done[0]}/{len(evaluators)}] {result['evaluator']}: "
                       f"{label_a}={result[f'score_{label_a}']} "
                       f"{label_b}={result[f'score_{label_b}']} "
-                      f"Δ={result['delta']:+d}")
+                      f"Δ={result['delta']:+g}")
 
     return results
 
@@ -297,7 +301,10 @@ def analyze_probe(results, probe_name, label_a, label_b):
     """Analyze a probe's results and compare to human baselines."""
     valid = [r for r in results if not r.get("error")]
     if not valid:
-        return {"probe": probe_name, "error": "No valid results"}
+        reasons = list(dict.fromkeys(str(r.get('error', 'Invalid result'))[:240] for r in results))
+        detail = '; '.join(reasons[:3])
+        return {"probe": probe_name, "error": "No valid results" + (": " + detail if detail else ""),
+                "failed_pairs": len(results)}
 
     deltas = [r["delta"] for r in valid]
     abs_deltas = [abs(d) for d in deltas]
@@ -314,6 +321,8 @@ def analyze_probe(results, probe_name, label_a, label_b):
     return {
         "probe": probe_name,
         "n": n,
+        "failed_pairs": len(results) - n,
+        "attempted_pairs": len(results),
         "avg_delta": round(avg_delta, 2),
         "avg_abs_delta": round(avg_abs_delta, 2),
         "max_delta": max(deltas),
@@ -347,6 +356,8 @@ def generate_report(all_analyses, model):
         if "error" in a:
             lines.append(f"{a['probe']:<12}  ERROR: {a['error']}")
             continue
+        if a.get('failed_pairs'):
+            lines.append(f"{a['probe']:<12}  Incomplete sample: {a['n']} valid, {a['failed_pairs']} failed pairs")
         baseline_pct = a["human_baseline"].get("expected_shift_pct", "?")
         gap = ""
         if isinstance(baseline_pct, (int, float)):
@@ -373,6 +384,10 @@ def generate_report(all_analyses, model):
         lines.append(f"**LLM result**: {a['shifted_pct']:.1f}% of evaluators shifted scores "
                      f"(avg |Δ| = {a['avg_abs_delta']:.2f} points)")
 
+        if a.get('failed_pairs'):
+            lines.append(f"**Assessment**: Incomplete sample ({a['failed_pairs']} failed pairs); no calibration conclusion.")
+            lines.append("")
+            continue
         expected = baseline.get("expected_shift_pct")
         if isinstance(expected, (int, float)):
             if a["shifted_pct"] > expected + 10:

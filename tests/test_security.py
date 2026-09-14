@@ -212,3 +212,26 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(response.status_code,200,response.text)
         self.assertEqual(response.json()['cohort_size'],50)
         self.assertLessEqual(max(sizes),2,'large batches cannot fit the 2048-token output cap')
+
+    def test_audit_budget_failure_returns_429_before_sse(self):
+        from types import SimpleNamespace
+        self.login()
+        sid=self.client.post('/api/session',json={'entity_text':'draft'},headers=self.headers).json()['session_id']
+        appmod.sessions[sid]['cohort']=[{'name':'A'}]
+        for _ in range(99): self.auth.model_call('owner@example.com')
+        model=SimpleNamespace(ensure_budget=lambda needed:self.auth.check_model_budget('owner@example.com',needed))
+        with patch.object(appmod,'_llm_from_params',return_value=(model,'test-model')),patch.object(appmod,'run_paired_evaluation') as paired:
+            response=self.client.get(f'/api/bias-audit/stream/{sid}?probes=order&sample=1',headers=self.headers)
+        self.assertEqual(response.status_code,429)
+        self.assertIn('Model-call',response.json()['detail'])
+        self.assertIn('retry-after',response.headers)
+        paired.assert_not_called()
+
+    def test_bounded_concerns_reach_suggestion_handler(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        self.login()
+        model=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=Mock(return_value=SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='{"changes": []}'))])))))
+        with patch.object(appmod,'llm_from_request',return_value=(model,'test-model')):
+            response=self.client.post('/api/suggest-changes',json={'entity_text':'draft','goal':'clarity','concerns':[f'Concern {i}' for i in range(15)]},headers=self.headers)
+        self.assertEqual(response.status_code,200,response.text)

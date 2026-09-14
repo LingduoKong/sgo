@@ -290,7 +290,12 @@ def get_client(api_key=None, base_url=None):
             if not user:
                 raise AuthError("Login expired or revoked", 401)
             auth.model_call(user['email'])
-        return LimitedClient(client, charge)
+        def preflight(needed):
+            user = auth.user(token)
+            if not user:
+                raise AuthError("Login expired or revoked", 401)
+            auth.check_model_budget(user['email'], needed)
+        return LimitedClient(client, charge, preflight)
     return client
 
 
@@ -785,6 +790,8 @@ Be specific to THIS entity, not generic."""
         content = resp.choices[0].message.content
         content = re.sub(r'<think>[\s\S]*?</think>', '', content).strip()
         return json.loads(content)
+    except AuthError:
+        raise
     except Exception as e:
         raise HTTPException(500, f"Failed to infer spec: {e}")
 
@@ -829,6 +836,8 @@ Return JSON:
         content = resp.choices[0].message.content
         content = re.sub(r'<think>[\s\S]*?</think>', '', content).strip()
         return json.loads(content)
+    except AuthError:
+        raise
     except Exception as e:
         raise HTTPException(500, f"Failed to suggest changes: {e}")
 
@@ -871,6 +880,8 @@ Be concrete and relevant — no generic segments."""
         content = re.sub(r'<think>[\s\S]*?</think>', '', content).strip()
         data = json.loads(content)
         return data
+    except AuthError:
+        raise
     except Exception as e:
         raise HTTPException(500, f"Failed to suggest segments: {e}")
 
@@ -1361,12 +1372,14 @@ async def bias_audit_stream(
 
     probe_list = [p.strip() for p in probes.split(",") if p.strip()]
 
+    client, mdl = _llm_from_params(request.state.api_key, request.state.base_url, request.state.model)
+    required_calls = 2 * min(sample, len(session['cohort'])) * len(probe_list) + (2 if 'framing' in probe_list else 0)
+    preflight = getattr(client, 'ensure_budget', None)
+    if callable(preflight):
+        preflight(required_calls)
+
     async def event_generator():
         import random
-        _api_key = request.state.api_key
-        _base_url = request.state.base_url
-        _model = request.state.model
-        client, mdl = _llm_from_params(_api_key, _base_url, _model)
         cohort = session["cohort"]
         entity_text = session["entity_text"]
 
@@ -1421,12 +1434,22 @@ async def bias_audit_stream(
                 "analysis": analysis,
             })}
 
+            if analysis.get('error'):
+                # More probes cannot support a conclusion after all pairs failed.
+                break
+
+        valid_probes = sum(not a.get('error') for a in all_analyses)
+        all_pairs_valid = all(not a.get('failed_pairs') for a in all_analyses)
+        status = 'failed' if not valid_probes else 'complete' if valid_probes == len(probe_list) and all_pairs_valid else 'partial'
+        failure = next((a['error'] for a in all_analyses if a.get('error')), 'Some paired evaluations failed; no full-sample calibration conclusion.')
         report = generate_report(all_analyses, mdl)
-        session["bias_audit"] = {"analyses": all_analyses, "report": report}
+        session["bias_audit"] = {"analyses": all_analyses, "report": report, "status": status}
 
         yield {"event": "complete", "data": json.dumps({
             "analyses": all_analyses,
             "report": report,
+            "status": status,
+            **({"error": failure} if status != "complete" else {}),
         })}
 
     return EventSourceResponse(event_generator(), ping=15)
